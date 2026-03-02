@@ -82,6 +82,54 @@ class AuthController extends Controller
     }
 
     /**
+     * Send OTP for login
+     */
+    public function sendLoginOtp(Request $request): JsonResponse
+    {
+        $request->validate([
+            'identifier' => 'required|string',
+        ]);
+
+        try {
+            $result = $this->authService->sendLoginOtp($request->identifier);
+
+            return $this->success($result['message'], $result);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->validationError($e->errors(), 'Invalid identifier');
+        } catch (\Exception $e) {
+            $statusCode = $e->getCode();
+            // Ensure status code is valid HTTP status code
+            if ($statusCode < 100 || $statusCode > 599) {
+                $statusCode = 500;
+            }
+
+            if ($statusCode === 404) {
+                 return $this->notFound('User not found');
+            }
+            
+            if ($statusCode === 403) {
+                return $this->forbidden($e->getMessage());
+            }
+
+            // For rate limiting (abort(429) throws HttpException which isn't caught by catch(\Exception) in older Laravel versions, 
+            // but in newer it is. Wait, abort() throws HttpException which extends Exception.
+            // But let's check if we need special handling. 
+            // abort(429) usually renders a response automatically.
+            // But if we catch \Exception, we catch it.
+            // So we need to rethrow if it's HttpException or handle it.
+            if ($e instanceof \Symfony\Component\HttpKernel\Exception\HttpException) {
+                 // return $this->error($e->getMessage(), $e->getStatusCode());
+                 // Or just let Laravel handle it?
+                 // If I catch it, I must return response.
+                 return $this->error($e->getMessage(), $e->getStatusCode());
+            }
+            
+            Log::error('API Send Login OTP failed: ' . $e->getMessage());
+            return $this->serverError('Failed to send OTP. Please try again.', $e);
+        }
+    }
+
+    /**
      * Verify Login OTP
      */
     public function verifyLogin(Request $request): JsonResponse

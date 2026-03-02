@@ -24,6 +24,7 @@ Route::prefix('v1')->group(function (): void {
         Route::controller(AuthController::class)->group(function () {
             Route::post('register', 'register');
             Route::post('login', 'login');
+            Route::post('login/send-otp', 'sendLoginOtp');
             Route::post('login/verify', 'verifyLogin');
             Route::post('forgot-password', 'forgotPassword');
             Route::post('reset-password', 'resetPassword');

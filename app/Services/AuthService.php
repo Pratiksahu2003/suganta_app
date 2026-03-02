@@ -249,6 +249,42 @@ class AuthService
         }
     }
 
+    public function sendLoginOtp(string $identifier): array
+    {
+        $type = $this->inputDetectionService->detectType($identifier);
+
+        if (!$type) {
+             throw ValidationException::withMessages([
+                'identifier' => ['Invalid identifier format'],
+            ]);
+        }
+
+        $user = null;
+        if ($type === 'email') {
+            $user = User::where('email', $identifier)->first();
+        } elseif ($type === 'phone') {
+            $user = User::where('phone', $identifier)->first();
+        }
+
+        if (!$user) {
+             throw new \Exception('User not found', 404);
+        }
+
+        if (!$user->is_active) {
+            throw new \Exception('Account is deactivated', 403);
+        }
+
+        // Send OTP
+        $this->otpService->sendOtp($user, $type);
+
+        return [
+            'success' => true,
+            'message' => "OTP sent to your {$type}.",
+            'identifier' => $identifier,
+            'type' => $type
+        ];
+    }
+
     /**
      * Verify Login OTP and issue token
      */
@@ -283,6 +319,12 @@ class AuthService
              throw ValidationException::withMessages([
                 'otp' => ['Invalid or expired OTP'],
             ]);
+        }
+        
+        // Check active status after verification to prevent enumeration?
+        // Or before? verifyOtp doesn't check active.
+        if (!$user->is_active) {
+            throw new \Exception('Account is deactivated', 403);
         }
 
         // Login Successful
