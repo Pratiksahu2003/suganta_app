@@ -225,6 +225,61 @@ Reset the user's password using the token received via email.
 
 ---
 
+### 8. Resend Verification OTP
+Resend the verification OTP to email or phone.
+
+- **Endpoint**: `POST /auth/verification/resend`
+- **Access**: Private (Requires Bearer Token)
+
+#### Headers
+```
+Authorization: Bearer <your_token_here>
+```
+
+#### Request Body
+```json
+{
+    "type": "email" // or "phone"
+}
+```
+
+#### Success Response (200 OK)
+```json
+{
+    "message": "Verification code sent."
+}
+```
+
+---
+
+### 9. Verify OTP
+Verify the OTP received via email or phone.
+
+- **Endpoint**: `POST /auth/verification/verify`
+- **Access**: Private (Requires Bearer Token)
+
+#### Headers
+```
+Authorization: Bearer <your_token_here>
+```
+
+#### Request Body
+```json
+{
+    "type": "email", // or "phone"
+    "otp": "123456"
+}
+```
+
+#### Success Response (200 OK)
+```json
+{
+    "message": "Email verified successfully."
+}
+```
+
+---
+
 ## Configuration Notes
 
 ### Cashfree Payment Gateway

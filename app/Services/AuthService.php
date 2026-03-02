@@ -18,17 +18,20 @@ class AuthService
     protected UserActivityNotificationService $userActivityService;
     protected PasswordNotificationService $passwordNotificationService;
     protected RegistrationPaymentService $registrationPaymentService;
+    protected OtpService $otpService;
 
     public function __construct(
         SessionService $sessionService,
         UserActivityNotificationService $userActivityService,
         PasswordNotificationService $passwordNotificationService,
-        RegistrationPaymentService $registrationPaymentService
+        RegistrationPaymentService $registrationPaymentService,
+        OtpService $otpService
     ) {
         $this->sessionService = $sessionService;
         $this->userActivityService = $userActivityService;
         $this->passwordNotificationService = $passwordNotificationService;
         $this->registrationPaymentService = $registrationPaymentService;
+        $this->otpService = $otpService;
     }
 
     /**
@@ -75,6 +78,9 @@ class AuthService
             $this->userActivityService->loginSuccessful($user, [
                 'login_method' => 'api_registration'
             ]);
+
+            // Send OTP
+            $this->otpService->sendOtp($user, 'email');
 
             return [
                 'user' => $user->only(['id', 'name', 'email', 'role']),

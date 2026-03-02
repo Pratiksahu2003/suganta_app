@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\V1\OptionController;
 use App\Http\Controllers\Api\V1\RegistrationController;
 use App\Http\Controllers\Api\V1\Auth\AuthController;
+use App\Http\Controllers\Api\V1\Auth\VerificationController;
 
 /*
 |--------------------------------------------------------------------------
@@ -18,17 +19,29 @@ use App\Http\Controllers\Api\V1\Auth\AuthController;
 
 Route::prefix('v1')->group(function (): void {
     // Auth Routes
-    Route::controller(AuthController::class)->prefix('auth')->group(function () {
-        Route::post('register', 'register');
-        Route::post('login', 'login');
-        Route::post('forgot-password', 'forgotPassword');
-        Route::post('reset-password', 'resetPassword');
-        
-        // Protected Routes
+    Route::prefix('auth')->group(function () {
+        // Public Auth Routes (AuthController)
+        Route::controller(AuthController::class)->group(function () {
+            Route::post('register', 'register');
+            Route::post('login', 'login');
+            Route::post('forgot-password', 'forgotPassword');
+            Route::post('reset-password', 'resetPassword');
+        });
+
+        // Protected Auth Routes
         Route::middleware('auth:sanctum')->group(function () {
-            Route::post('logout', 'logout');
-            Route::post('logout-all', 'logoutFromAllDevices');
-            Route::post('refresh-token', 'refreshToken');
+            // AuthController Protected Routes
+            Route::controller(AuthController::class)->group(function () {
+                Route::post('logout', 'logout');
+                Route::post('logout-all', 'logoutFromAllDevices');
+                Route::post('refresh-token', 'refreshToken');
+            });
+
+            // Verification Routes (VerificationController)
+            Route::controller(VerificationController::class)->prefix('verification')->group(function () {
+                Route::post('resend', 'resend');
+                Route::post('verify', 'verify');
+            });
         });
     });
 
