@@ -35,4 +35,11 @@ return [
         ],
     ],
 
+    'smscountry' => [
+        'auth_key' => env('SMS_COUNTRY_AUTH_KEY'),
+        'auth_token' => env('SMS_COUNTRY_AUTH_TOKEN'),
+        'sender_id' => env('SMS_COUNTRY_SENDER_ID'),
+        'url' => env('SMS_COUNTRY_BASE_URL'),
+    ],
+
 ];
