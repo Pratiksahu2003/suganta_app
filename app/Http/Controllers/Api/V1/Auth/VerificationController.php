@@ -46,16 +46,41 @@ class VerificationController extends Controller
     public function verify(Request $request)
     {
         $request->validate([
-            'otp' => 'required|string',
-            'type' => 'required|in:email,phone',
+            'email_otp' => 'nullable|string',
+            'phone_otp' => 'nullable|string',
         ]);
 
-        $user = $request->user();
-        
-        if ($this->otpService->verifyOtp($user, $request->otp, $request->type)) {
-            return response()->json(['message' => ucfirst($request->type) . ' verified successfully.']);
+        if (!$request->email_otp && !$request->phone_otp) {
+            return response()->json(['message' => 'Please provide email_otp or phone_otp.'], 422);
         }
 
-        return response()->json(['message' => 'Invalid or expired verification code.'], 400);
+        $user = $request->user();
+        $messages = [];
+        $hasError = false;
+
+        // Verify Email OTP
+        if ($request->filled('email_otp')) {
+            if ($this->otpService->verifyOtp($user, $request->email_otp, 'email')) {
+                $messages[] = 'Email verified successfully.';
+            } else {
+                $messages[] = 'Invalid or expired Email OTP.';
+                $hasError = true;
+            }
+        }
+
+        // Verify Phone OTP
+        if ($request->filled('phone_otp')) {
+            if ($this->otpService->verifyOtp($user, $request->phone_otp, 'phone')) {
+                $messages[] = 'Phone verified successfully.';
+            } else {
+                $messages[] = 'Invalid or expired Phone OTP.';
+                $hasError = true;
+            }
+        }
+
+        return response()->json([
+            'message' => implode(' ', $messages),
+            'user' => $user->fresh()->only(['id', 'email', 'phone', 'email_verified_at', 'phone_verified_at', 'verification_status'])
+        ], $hasError ? 400 : 200);
     }
 }
