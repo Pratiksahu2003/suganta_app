@@ -58,9 +58,9 @@ class OtpService
         RateLimiter::hit($cooldownKey, 120);
 
         // Invalidate previous OTPs
-        Otp::where('user_id', $user->id)
+        Otp::where('identifier', $identifier)
             ->where('type', $type)
-            ->update(['verified' => true]); // Mark as used/invalid
+            ->update(['is_used' => true]); // Mark as used/invalid
 
         // Generate 6 digit OTP
         $otpCode = (string) rand(100000, 999999);
@@ -71,12 +71,11 @@ class OtpService
         }
 
         Otp::create([
-            'user_id' => $user->id,
             'identifier' => $type === 'email' ? $user->email : $user->phone,
             'type' => $type,
             'otp' => Hash::make($otpCode),
             'expires_at' => Carbon::now()->addMinutes(10),
-            'verified' => false,
+            'is_used' => false,
         ]);
 
         if ($type === 'email') {
@@ -91,9 +90,10 @@ class OtpService
      */
     public function verifyOtp(User $user, string $otpCode, string $type = 'email'): bool
     {
-        $otpRecord = Otp::where('user_id', $user->id)
+        $identifier = $type === 'email' ? $user->email : $user->phone;
+        $otpRecord = Otp::where('identifier', $identifier)
             ->where('type', $type)
-            ->where('verified', false)
+            ->where('is_used', false)
             ->where('expires_at', '>', Carbon::now())
             ->latest()
             ->first();
@@ -103,7 +103,7 @@ class OtpService
         }
 
         // Mark as verified
-        $otpRecord->update(['verified' => true]);
+        $otpRecord->update(['is_used' => true]);
         
         // Update user verification status
         if ($type === 'email') {
@@ -143,10 +143,10 @@ class OtpService
             // Use template if available, otherwise raw
             // Assuming template key 'otp_verification' exists
             try {
-                $this->smsService->sendTemplate($user->phone, 'otp_verification', ['otp' => $otp]);
+                $this->smsService->sendTemplate($user->phone, 'dlt_otp_verification', ['otp' => $otp]);
             } catch (\Exception $e) {
                 // Fallback to raw message
-                $message = "Your Verification Code is {$otp}. Valid for 10 minutes.";
+                $message = "{$otp}. is your verification code for Suganta Tutors. It expires in 5 minutes.";
                 $this->smsService->sendRaw($user->phone, $message);
             }
         } catch (\Exception $e) {

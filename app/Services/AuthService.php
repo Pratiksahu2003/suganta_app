@@ -101,7 +101,7 @@ class AuthService
                 }
 
                 return [
-                    'user' => $user->only(['id', 'name', 'email', 'role']),
+                    'user' => $user->only(['id', 'name', 'email', 'role' ,'email_verified_at', 'phone_verified_at' ,'registration_fee_status']),
                     'token' => $token,
                     'token_type' => 'Bearer'
                 ];
