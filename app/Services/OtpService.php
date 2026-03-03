@@ -133,7 +133,7 @@ class OtpService
         }
 
         // Mark as verified
-        $otpRecord->update(['is_used' => true, 'verified' => true]);
+        $otpRecord->update(['is_used' => true, 'used_at' => now()]);
         
         // Update user verification status
         if ($type === 'email') {
