@@ -12,11 +12,20 @@ class InputDetectionService
      */
     public function detectType(string $input): ?string
     {
+        $input = trim($input);
+
+        if ($input === '') {
+            return null;
+        }
+
         if ($this->isValidEmail($input)) {
             return 'email';
-        } else {
+        }
+
+        if ($this->isValidPhone($input)) {
             return 'phone';
         }
+
         return null;
     }
 
@@ -26,8 +35,32 @@ class InputDetectionService
      * @param string $email
      * @return bool
      */
-    public function isValidEmail(string $email): bool
+    private function isValidEmail(string $email): bool
     {
         return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
+    }
+
+    /**
+     * Basic phone number validation.
+     *
+     * Accepts numbers with optional +, spaces, dashes, and parentheses.
+     * Ensures there are enough digits to be a realistic phone number.
+     *
+     * @param string $phone
+     * @return bool
+     */
+    private function isValidPhone(string $phone): bool
+    {
+        // Remove common formatting characters
+        $digitsOnly = preg_replace('/\D+/', '', $phone);
+
+        // Require between 7 and 15 digits (typical phone number range)
+        if ($digitsOnly === null) {
+            return false;
+        }
+
+        $length = strlen($digitsOnly);
+
+        return $length >= 7 && $length <= 15;
     }
 }
