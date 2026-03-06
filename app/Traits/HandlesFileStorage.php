@@ -210,6 +210,7 @@ trait HandlesFileStorage
         return match ($module) {
             'portfolio' => $type === 'image' ? 'portfolios/images' : 'portfolios',
             'support-ticket' => 'support-tickets',
+            'profile' => $type === 'avatar' ? 'profile-images' : 'profile',
             default => $module,
         };
     }

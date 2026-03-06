@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\PortfolioController;
 use App\Http\Controllers\Api\V1\ContactController;
 use App\Http\Controllers\Api\V1\LeadController;
+use App\Http\Controllers\Api\V1\Profile\ProfileController;
 
 /*
 |--------------------------------------------------------------------------
@@ -95,5 +96,23 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/', 'index');
         Route::post('/', 'store');
         Route::get('{lead}', 'show');
+    });
+
+    // Profile Routes (auth user's own profile only)
+    Route::middleware('auth:sanctum')->prefix('profile')->controller(ProfileController::class)->group(function () {
+        Route::get('/', 'index');
+        Route::match(['put', 'patch'], '/', 'update');
+        Route::match(['put', 'patch'], 'location', 'updateLocation');
+        Route::match(['put', 'patch'], 'social', 'updateSocial');
+        Route::match(['put', 'patch'], 'teaching', 'updateTeaching');
+        Route::match(['put', 'patch'], 'institute', 'updateInstitute');
+        Route::match(['put', 'patch'], 'student', 'updateStudent');
+        Route::match(['put', 'post'], 'avatar', 'updateAvatar');
+        Route::match(['put', 'patch'], 'password', 'updatePassword');
+        Route::match(['put', 'patch'], 'preferences', 'updatePreferences');
+        Route::get('completion', 'completion');
+        Route::post('refresh', 'refresh');
+        Route::post('cache/clear', 'clearCache');
+        Route::delete('/', 'destroy');
     });
 });

@@ -21,6 +21,7 @@ Welcome to the SuGanta API documentation! This folder contains comprehensive doc
 - [Notification Architecture](./NOTIFICATION_ARCHITECTURE.md) - Resource-based notification system design
 
 ### Feature-Specific APIs
+- [Profile API](./ProfileApi.md) - User profile management endpoints
 - [Registration API](./RegistrationApi.md) - User registration endpoints
 - [Options API](./OptionApi.md) - Dropdown options and configuration
 
@@ -153,7 +154,7 @@ if (notification.resource_type === 'support_ticket') {
 
 | Topic | Documentation |
 |-------|---------------|
-| **API Endpoints** | [Support Ticket API](./SUPPORT_TICKET_API.md), [Registration API](./RegistrationApi.md), [Options API](./OptionApi.md) |
+| **API Endpoints** | [Profile API](./ProfileApi.md), [Support Ticket API](./SUPPORT_TICKET_API.md), [Registration API](./RegistrationApi.md), [Options API](./OptionApi.md) |
 | **File Uploads** | [Support Ticket API](./SUPPORT_TICKET_API.md#file-upload-specifications), [Setup Storage](./SETUP_STORAGE.md) |
 | **Notifications** | [Notification Architecture](./NOTIFICATION_ARCHITECTURE.md) |
 | **Authentication** | [API Documentation](./API_DOCUMENTATION.md) |
@@ -188,6 +189,7 @@ if (notification.resource_type === 'support_ticket') {
 
 | Feature | Status | Documentation |
 |---------|--------|---------------|
+| Profile API | ✅ Production Ready | [Profile API Docs](./ProfileApi.md) |
 | Support Tickets | ✅ Production Ready | [Complete Docs](./SUPPORT_TICKET_API.md) |
 | File Uploads | ✅ Production Ready | [Setup Guide](./SETUP_STORAGE.md) |
 | Notifications | ✅ Production Ready | [Architecture](./NOTIFICATION_ARCHITECTURE.md) |

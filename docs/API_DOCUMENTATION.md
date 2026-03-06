@@ -3,6 +3,19 @@
 ## Base URL
 `http://localhost:8000/api/v1`
 
+## API Modules
+
+| Module | Documentation | Description |
+|--------|---------------|-------------|
+| **Profile** | [Profile API](./ProfileApi.md) | User profile, location, social, teaching, institute, student, avatar, password, preferences |
+| **Auth** | (below) | Register, login, logout, password reset, verification |
+| **Support Tickets** | [Support Ticket API](./SUPPORT_TICKET_API.md) | Create, manage support tickets |
+| **Portfolio** | [Portfolio API](./PortfolioApi.md) | User portfolios |
+| **Registration** | [Registration API](./RegistrationApi.md) | Registration flows |
+| **Options** | [Options API](./OptionApi.md) | Dropdown options |
+
+---
+
 ## Authentication
 
 ### 1. Register User
