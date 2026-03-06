@@ -268,13 +268,14 @@ class AuthService
         if ($type === 'email') {
             $user = User::where('email', $identifier)->first();
         } elseif ($type === 'phone') {
-            $normalizedPhone = $this->inputDetectionService->formatPhone($identifier);
+            $normalizedPhone = $this->inputDetectionService->isValidPhone($identifier);
             if (!$normalizedPhone) {
                 throw ValidationException::withMessages([
                     'identifier' => ['Invalid phone number format'],
                 ]);
             }
-            $user = User::where('phone', $normalizedPhone)->first();
+           
+            $user = User::where('phone', $identifier)->first();
         }
 
         if (!$user) {
@@ -315,13 +316,13 @@ class AuthService
         if ($type === 'email') {
             $user = User::where('email', $identifier)->first();
         } elseif ($type === 'phone') {
-            $normalizedPhone = $this->inputDetectionService->formatPhone($identifier);
+            $normalizedPhone = $this->inputDetectionService->isValidPhone($identifier);
             if (!$normalizedPhone) {
                 throw ValidationException::withMessages([
                     'identifier' => ['Invalid phone number format'],
                 ]);
             }
-            $user = User::where('phone', $normalizedPhone)->first();
+            $user = User::where('phone', $identifier)->first();
         }
 
         if (!$user) {

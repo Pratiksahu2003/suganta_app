@@ -49,7 +49,7 @@ class InputDetectionService
      * @param string $phone
      * @return bool
      */
-    private function isValidPhone(string $phone): bool
+    public  function isValidPhone(string $phone): bool
     {
         // Remove common formatting characters
         $digitsOnly = preg_replace('/\D+/', '', $phone);

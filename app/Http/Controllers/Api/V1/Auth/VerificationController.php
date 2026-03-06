@@ -84,7 +84,7 @@ class VerificationController extends Controller
 
         $message = implode(' ', $messages);
         $userData = $user->fresh()->only(['id','role','email', 'phone', 'email_verified_at', 'registration_fee_status', 'verification_status']);
-
+        $userData['payment_required'] = $user->role != 'student' ? true : false;
         if ($hasError) {
              // In case of error, we might still want to return user data for context?
              // But error() puts data into 'errors'. 
