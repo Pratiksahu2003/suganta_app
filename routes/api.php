@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\V1\RegistrationController;
 use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\Auth\VerificationController;
 use App\Http\Controllers\Api\V1\SupportTicketController;
+use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\PortfolioController;
 
 /*
@@ -65,6 +66,12 @@ Route::prefix('v1')->group(function (): void {
         Route::post('{supportTicket}/reply', [SupportTicketController::class, 'reply']);
         Route::get('{supportTicket}/attachment', [SupportTicketController::class, 'downloadAttachment']);
         Route::get('{supportTicket}/replies/{reply}/attachment', [SupportTicketController::class, 'downloadReplyAttachment']);
+    });
+
+    // Payment Routes (auth user's data only)
+    Route::middleware('auth:sanctum')->prefix('payments')->controller(PaymentController::class)->group(function () {
+        Route::get('/', 'index');
+        Route::get('invoice/{orderId}', 'invoice');
     });
 
     // Portfolio Routes (auth user's data only)

@@ -1,0 +1,226 @@
+{
+	"info": {
+		"_postman_id": "portfolio-api-collection",
+		"name": "Portfolio API",
+		"description": "Portfolio API - Auth user only. Base URL: {{base_url}}",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000/api/v1"
+		},
+		{
+			"key": "token",
+			"value": "your-bearer-token-here"
+		},
+		{
+			"key": "portfolio_id",
+			"value": "1"
+		},
+		{
+			"key": "order_id",
+			"value": "REG_X2LTQWD89E"
+		}
+	],
+	"item": [
+		{
+			"name": "1. Login (Get Token)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"email\": \"user@example.com\",\n    \"password\": \"password\"\n}"
+				},
+				"url": "{{base_url}}/auth/login",
+				"description": "Login to get Bearer token. Use the token in Portfolio requests."
+			}
+		},
+		{
+			"name": "2. Get Payment History",
+			"request": {
+				"method": "GET",
+				"header": [
+					{"key": "Authorization", "value": "Bearer {{token}}"},
+					{"key": "Accept", "value": "application/json"}
+				],
+				"url": "{{base_url}}/payments?per_page=15",
+				"description": "Get auth user's payment history. Optional: status (success|failed|pending|created|cancelled|refunded), per_page (max 50)."
+			}
+		},
+		{
+			"name": "2b. Get Invoice URL",
+			"request": {
+				"method": "GET",
+				"header": [
+					{"key": "Authorization", "value": "Bearer {{token}}"},
+					{"key": "Accept", "value": "application/json"}
+				],
+				"url": "{{base_url}}/payments/invoice/{{order_id}}",
+				"description": "Get signed invoice URL for a successful payment. Replace {{order_id}} with actual order_id (e.g. REG_X2LTQWD89E)."
+			}
+		},
+		{
+			"name": "3. Get Options",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{token}}"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json"
+					}
+				],
+				"url": "{{base_url}}/portfolios/options",
+				"description": "Get dropdown options (statuses, categories, tags) from auth user's portfolios."
+			}
+		},
+		{
+			"name": "3. Show Portfolios",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{token}}"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json"
+					}
+				],
+				"url": "{{base_url}}/portfolios",
+				"description": "Get auth user's portfolios (no ID in URL)."
+			}
+		},
+		{
+			"name": "4. Create Portfolio (form-data)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{token}}"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{"key": "title", "value": "My Project", "type": "text"},
+						{"key": "description", "value": "Project description", "type": "text"},
+						{"key": "category", "value": "Web Development, SaaS", "type": "text"},
+						{"key": "tags", "value": "Laravel, Vue.js, MySQL", "type": "text"},
+						{"key": "url", "value": "https://example.com/project", "type": "text"},
+						{"key": "status", "value": "published", "type": "text"},
+						{"key": "order", "value": "0", "type": "text"},
+						{"key": "is_featured", "value": "true", "type": "text"},
+						{"key": "images[]", "type": "file", "src": "", "description": "Optional image files"},
+						{"key": "files[]", "type": "file", "src": "", "description": "Optional document files"}
+					]
+				},
+				"url": "{{base_url}}/portfolios",
+				"description": "Create portfolio. Remove images[]/files[] if not uploading."
+			}
+		},
+		{
+			"name": "4b. Create Portfolio (raw JSON - no files)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{token}}"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"title\": \"My Project\",\n    \"description\": \"Project description\",\n    \"category\": \"Web Development, SaaS\",\n    \"tags\": \"Laravel, Vue.js, MySQL\",\n    \"url\": \"https://example.com/project\",\n    \"status\": \"published\",\n    \"order\": 0,\n    \"is_featured\": true\n}"
+				},
+				"url": "{{base_url}}/portfolios",
+				"description": "Create portfolio with JSON (no file uploads). Note: API may expect form-data; use 4. Create for file uploads."
+			}
+		},
+		{
+			"name": "5. Update Portfolio (form-data)",
+			"request": {
+				"method": "PUT",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{token}}"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{"key": "title", "value": "Updated Project Title", "type": "text"},
+						{"key": "description", "value": "Updated description", "type": "text"},
+						{"key": "category", "value": "Web Development, Mobile", "type": "text"},
+						{"key": "tags", "value": "Laravel, React, PostgreSQL", "type": "text"},
+						{"key": "url", "value": "https://example.com/updated", "type": "text"},
+						{"key": "status", "value": "published", "type": "text"},
+						{"key": "order", "value": "1", "type": "text"},
+						{"key": "is_featured", "value": "false", "type": "text"},
+						{"key": "images[]", "type": "file", "src": ""},
+						{"key": "remove_images[]", "value": "portfolios/images/old.jpg", "type": "text", "description": "Path to remove"},
+						{"key": "files[]", "type": "file", "src": ""},
+						{"key": "remove_files[]", "value": "portfolios/old.pdf", "type": "text", "description": "Path to remove"}
+					]
+				},
+				"url": "{{base_url}}/portfolios/{{portfolio_id}}",
+				"description": "Update portfolio by ID. Include only fields to update."
+			}
+		},
+		{
+			"name": "5b. Update Portfolio (raw JSON)",
+			"request": {
+				"method": "PUT",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{token}}"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"title\": \"Updated Project Title\",\n    \"description\": \"Updated description\",\n    \"category\": \"Web Development, Mobile\",\n    \"tags\": \"Laravel, React, PostgreSQL\",\n    \"url\": \"https://example.com/updated\",\n    \"status\": \"published\",\n    \"order\": 1,\n    \"is_featured\": false\n}"
+				},
+				"url": "{{base_url}}/portfolios/{{portfolio_id}}",
+				"description": "Update portfolio with JSON (no file changes). Replace {{portfolio_id}} with actual ID."
+			}
+		}
+	]
+}
