@@ -109,7 +109,7 @@ class Lead extends Model
             return $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
                   ->orWhere('email', 'like', "%{$search}%")
-                  ->orWhere('subject', 'like', "%{$search}%")
+                  ->orWhere('subject_interest', 'like', "%{$search}%")
                   ->orWhere('message', 'like', "%{$search}%");
             });
         }
@@ -168,6 +168,21 @@ class Lead extends Model
     public function scopeAssignedTo($query, $userId)
     {
         return $query->where('assigned_to', $userId);
+    }
+
+    /**
+     * Scope to get leads for authenticated user only:
+     * - Leads owned by the user (lead_owner_id)
+     * - Leads assigned to the user (assigned_to)
+     * - Leads created by the user (user_id)
+     */
+    public function scopeForAuthUser($query, $userId)
+    {
+        return $query->where(function ($q) use ($userId) {
+            $q->where('user_id', $userId)
+                ->orWhere('lead_owner_id', $userId)
+                ->orWhere('assigned_to', $userId);
+        });
     }
 
     /**

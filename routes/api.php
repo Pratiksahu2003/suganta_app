@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\V1\SupportTicketController;
 use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\PortfolioController;
 use App\Http\Controllers\Api\V1\ContactController;
+use App\Http\Controllers\Api\V1\LeadController;
 
 /*
 |--------------------------------------------------------------------------
@@ -88,4 +89,10 @@ Route::prefix('v1')->group(function (): void {
             Route::post('/', 'store');
             Route::match(['put', 'patch'], '{portfolio}', 'update');
         });
+
+    // Lead Routes (auth user's own leads and created leads only)
+    Route::middleware('auth:sanctum')->prefix('leads')->controller(LeadController::class)->group(function () {
+        Route::get('/', 'index');
+        Route::get('{lead}', 'show');
+    });
 });
