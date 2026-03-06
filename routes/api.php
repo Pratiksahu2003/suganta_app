@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\V1\PortfolioController;
 use App\Http\Controllers\Api\V1\ContactController;
 use App\Http\Controllers\Api\V1\LeadController;
 use App\Http\Controllers\Api\V1\Profile\ProfileController;
+use App\Http\Controllers\Api\V1\RoleController;
 use App\Http\Controllers\Api\V1\StudyRequirementController;
 
 /*
@@ -56,6 +57,7 @@ Route::prefix('v1')->group(function (): void {
 
     Route::get('options', [OptionController::class, 'index']);
     Route::get('registration/charges', [RegistrationController::class, 'charges']);
+    Route::get('roles', [RoleController::class, 'index']);
 
     // Contact form (public - no auth)
     Route::post('contacts', [ContactController::class, 'store']);
