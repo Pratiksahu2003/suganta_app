@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\OptionController;
 use App\Http\Controllers\Api\V1\RegistrationController;
 use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\Auth\VerificationController;
+use App\Http\Controllers\Api\V1\SupportTicketController;
 
 /*
 |--------------------------------------------------------------------------
@@ -49,4 +50,11 @@ Route::prefix('v1')->group(function (): void {
 
     Route::get('options', [OptionController::class, 'index']);
     Route::get('registration/charges', [RegistrationController::class, 'charges']);
+
+    // Support Ticket Routes (protected)
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::get('support-tickets/options', [SupportTicketController::class, 'options']);
+        Route::apiResource('support-tickets', SupportTicketController::class)
+            ->parameters(['support-tickets' => 'supportTicket']);
+    });
 });
