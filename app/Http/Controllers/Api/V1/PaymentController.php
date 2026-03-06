@@ -35,7 +35,23 @@ class PaymentController extends BaseApiController
             return $this->formatPaymentForResponse($payment);
         });
 
-        return $this->paginated($data, 'Payment history retrieved successfully.');
+        return $this->success('Payment history retrieved successfully.', [
+            'data' => $data->items(),
+            'meta' => [
+                'current_page' => $data->currentPage(),
+                'last_page' => $data->lastPage(),
+                'per_page' => $data->perPage(),
+                'total' => $data->total(),
+                'from' => $data->firstItem(),
+                'to' => $data->lastItem(),
+            ],
+            'links' => [
+                'first' => $data->url(1),
+                'last' => $data->url($data->lastPage()),
+                'prev' => $data->previousPageUrl(),
+                'next' => $data->nextPageUrl(),
+            ],
+        ]);
     }
 
     /**
