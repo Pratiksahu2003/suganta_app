@@ -3,13 +3,15 @@
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
-    return view('welcome');
+    return  redirect('https://www.suganta.com');
 });
 
-// Placeholder routes for API notifications
-Route::get('/dashboard', function () {})->name('dashboard');
-Route::get('/dashboard/profile', function () {})->name('dashboard.profile');
-Route::get('/login', function () {})->name('login');
-Route::get('/verification/notice', function () {})->name('verification.notice');
-Route::get('/notifications/settings', function () {})->name('notifications.settings');
-Route::get('/subscription/details', function () {})->name('subscription.details');
+Route::get('/api', function () {
+    return  redirect('https://www.suganta.com');
+});
+
+Route::get('/api/v1', function () {
+    return  redirect('https://www.suganta.com');
+});
+
+
