@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\V1\PortfolioController;
 use App\Http\Controllers\Api\V1\ContactController;
 use App\Http\Controllers\Api\V1\LeadController;
 use App\Http\Controllers\Api\V1\Profile\ProfileController;
+use App\Http\Controllers\Api\V1\StudyRequirementController;
 
 /*
 |--------------------------------------------------------------------------
@@ -97,6 +98,14 @@ Route::prefix('v1')->group(function (): void {
         Route::post('/', 'store');
         Route::get('{lead}', 'show');
     });
+
+    // Study Requirement Routes (paginated listing)
+    Route::middleware('auth:sanctum')
+        ->prefix('study-requirements')
+        ->controller(StudyRequirementController::class)
+        ->group(function () {
+            Route::get('/', 'index');
+        });
 
     // Profile Routes (auth user's own profile only)
     Route::middleware('auth:sanctum')->prefix('profile')->controller(ProfileController::class)->group(function () {
