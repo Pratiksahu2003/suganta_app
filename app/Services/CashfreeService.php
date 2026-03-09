@@ -192,6 +192,42 @@ class CashfreeService
             return false;
         }
 
+        // Prefer Cashfree SDK verification when available (avoids subtle format differences).
+        // Use dynamic class name to avoid hard dependency during static analysis.
+        $cashfreeClass = '\\Cashfree\\Cashfree';
+        if (class_exists($cashfreeClass)) {
+            try {
+                // SDK uses static config properties.
+                if (property_exists($cashfreeClass, 'XClientId')) {
+                    $cashfreeClass::$XClientId = $this->appId;
+                }
+                if (property_exists($cashfreeClass, 'XClientSecret')) {
+                    $cashfreeClass::$XClientSecret = $secret;
+                }
+                if (property_exists($cashfreeClass, 'XEnvironment')) {
+                    $env = null;
+                    if ($this->isProduction && property_exists($cashfreeClass, 'PRODUCTION')) {
+                        $env = $cashfreeClass::$PRODUCTION;
+                    } elseif (!$this->isProduction && property_exists($cashfreeClass, 'SANDBOX')) {
+                        $env = $cashfreeClass::$SANDBOX;
+                    }
+                    if ($env !== null) {
+                        $cashfreeClass::$XEnvironment = $env;
+                    }
+                }
+
+                $cashfree = new $cashfreeClass();
+                $cashfree->PGVerifyWebhookSignature($signature, $rawBody, $timestamp);
+                return true;
+            } catch (\Throwable $e) {
+                if (config('app.debug')) {
+                    Log::debug('Cashfree webhook: SDK signature verification failed (falling back to manual)', [
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+        }
+
         $verify = function (string $signedPayload) use ($secret, $signature): bool {
             $computed = base64_encode(hash_hmac('sha256', $signedPayload, $secret, true));
             return hash_equals($computed, $signature);
@@ -202,6 +238,23 @@ class CashfreeService
             if ($verify($payload)) {
                 return true;
             }
+        }
+
+        if (config('app.debug')) {
+            $computed = [
+                'ts+body'      => base64_encode(hash_hmac('sha256', $timestamp . $rawBody, $secret, true)),
+                'ts.+body'     => base64_encode(hash_hmac('sha256', $timestamp . '.' . $rawBody, $secret, true)),
+                'body+ts'      => base64_encode(hash_hmac('sha256', $rawBody . $timestamp, $secret, true)),
+                'raw_sha256'   => hash('sha256', $rawBody),
+                'raw_len'      => strlen($rawBody),
+                'ts_len'       => strlen($timestamp),
+                'sig_len'      => strlen($signature),
+            ];
+            Log::debug('Cashfree webhook: signature mismatch debug', [
+                'timestamp'          => $timestamp,
+                'received_signature' => $signature,
+                'computed'           => $computed,
+            ]);
         }
 
         return false;
