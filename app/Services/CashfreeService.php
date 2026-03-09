@@ -194,30 +194,19 @@ class CashfreeService
 
         // Prefer Cashfree SDK verification when available (avoids subtle format differences).
         // Use dynamic class name to avoid hard dependency during static analysis.
+        //
+        // IMPORTANT: The installed SDK in this repo (cashfree/cashfree-pg v5.0.3) uses
+        // a constructor with params (environment, clientId, clientSecret, ...).
         $cashfreeClass = '\\Cashfree\\Cashfree';
         if (class_exists($cashfreeClass)) {
             try {
-                // SDK uses static config properties.
-                if (property_exists($cashfreeClass, 'XClientId')) {
-                    $cashfreeClass::$XClientId = $this->appId;
-                }
-                if (property_exists($cashfreeClass, 'XClientSecret')) {
-                    $cashfreeClass::$XClientSecret = $secret;
-                }
-                if (property_exists($cashfreeClass, 'XEnvironment')) {
-                    $env = null;
-                    if ($this->isProduction && property_exists($cashfreeClass, 'PRODUCTION')) {
-                        $env = $cashfreeClass::$PRODUCTION;
-                    } elseif (!$this->isProduction && property_exists($cashfreeClass, 'SANDBOX')) {
-                        $env = $cashfreeClass::$SANDBOX;
-                    }
-                    if ($env !== null) {
-                        $cashfreeClass::$XEnvironment = $env;
-                    }
-                }
+                // SDK uses 0 = SANDBOX, 1 = PRODUCTION
+                $env = $this->isProduction ? 1 : 0;
 
-                $cashfree = new $cashfreeClass();
+                /** @var object $cashfree */
+                $cashfree = new $cashfreeClass($env, $this->appId, $secret, '', '', '', false);
                 $cashfree->PGVerifyWebhookSignature($signature, $rawBody, $timestamp);
+
                 return true;
             } catch (\Throwable $e) {
                 if (config('app.debug')) {
@@ -245,6 +234,9 @@ class CashfreeService
                 'ts+body'      => base64_encode(hash_hmac('sha256', $timestamp . $rawBody, $secret, true)),
                 'ts.+body'     => base64_encode(hash_hmac('sha256', $timestamp . '.' . $rawBody, $secret, true)),
                 'body+ts'      => base64_encode(hash_hmac('sha256', $rawBody . $timestamp, $secret, true)),
+                // Helps confirm we’re using the same secret as your dashboard (no secret leakage).
+                'secret_hash'  => substr(hash('sha256', $secret), 0, 16),
+                'secret_last4' => substr($secret, -4),
                 'raw_sha256'   => hash('sha256', $rawBody),
                 'raw_len'      => strlen($rawBody),
                 'ts_len'       => strlen($timestamp),
