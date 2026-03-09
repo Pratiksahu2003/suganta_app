@@ -171,27 +171,44 @@ class CashfreeService
     /**
      * Verify the HMAC-SHA256 signature from a Cashfree webhook.
      *
-     * Cashfree signs webhooks as:
-     *   signedPayload = timestamp + rawBody   (no separator)
-     *   expectedSignature = Base64Encode( HMAC_SHA256( signedPayload, merchantSecretKey ) )
+     * Uses the official Cashfree PHP SDK when available for guaranteed
+     * compatibility; falls back to manual verification otherwise.
      *
-     * @see https://www.cashfree.com/docs/payments/webhooks
+     * @see https://www.cashfree.com/docs/payments/online/webhooks/signature-verification
      */
     public function verifyWebhookSignature(string $rawBody, string $signature, string $timestamp): bool
     {
-        $secret = trim(config('cashfree.webhook_secret') ?: $this->secretKey);
+        $signature = trim($signature);
+        $timestamp = trim($timestamp);
 
-        if ($secret === '' || $signature === '' || $timestamp === '') {
+        if ($signature === '' || $timestamp === '') {
             return false;
         }
 
-        $signedPayload = (string) $timestamp . $rawBody;
+        $secret = config('cashfree.webhook_secret') ?: $this->secretKey;
+        $secret = is_string($secret) ? trim($secret) : $this->secretKey;
 
-        $computed = base64_encode(
-            hash_hmac('sha256', $signedPayload, $secret, true)
-        );
+        if ($secret === '') {
+            return false;
+        }
 
-        return hash_equals($computed, trim($signature));
+        // Prefer official Cashfree SDK when available (guaranteed algorithm match)
+        if (class_exists(\Cashfree\Cashfree::class)) {
+            try {
+                $env = $this->isProduction ? \Cashfree\Cashfree::PRODUCTION : \Cashfree\Cashfree::SANDBOX;
+                $cashfree = new \Cashfree\Cashfree($env, $this->appId, $secret, '', '', '', false);
+                $cashfree->PGVerifyWebhookSignature($signature, $rawBody, $timestamp);
+                return true;
+            } catch (\Throwable $e) {
+                return false;
+            }
+        }
+
+        // Manual verification (same algorithm as SDK)
+        $signedPayload = $timestamp . $rawBody;
+        $computed = base64_encode(hash_hmac('sha256', $signedPayload, $secret, true));
+
+        return hash_equals($computed, $signature);
     }
 
     /**
