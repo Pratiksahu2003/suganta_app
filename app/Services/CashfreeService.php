@@ -172,21 +172,26 @@ class CashfreeService
      * Verify the HMAC-SHA256 signature from a Cashfree webhook.
      *
      * Cashfree signs webhooks as:
-     *   base64( HMAC_SHA256( timestamp + rawBody, clientSecret ) )
+     *   signedPayload = timestamp + rawBody   (no separator)
+     *   expectedSignature = Base64Encode( HMAC_SHA256( signedPayload, merchantSecretKey ) )
+     *
+     * @see https://www.cashfree.com/docs/payments/webhooks
      */
     public function verifyWebhookSignature(string $rawBody, string $signature, string $timestamp): bool
     {
-        $secret = config('cashfree.webhook_secret') ?: $this->secretKey;
+        $secret = trim(config('cashfree.webhook_secret') ?: $this->secretKey);
 
-        if (empty($secret) || empty($signature) || empty($timestamp)) {
+        if ($secret === '' || $signature === '' || $timestamp === '') {
             return false;
         }
 
+        $signedPayload = (string) $timestamp . $rawBody;
+
         $computed = base64_encode(
-            hash_hmac('sha256', $timestamp . $rawBody, $secret, true)
+            hash_hmac('sha256', $signedPayload, $secret, true)
         );
 
-        return hash_equals($computed, $signature);
+        return hash_equals($computed, trim($signature));
     }
 
     /**

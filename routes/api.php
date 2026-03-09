@@ -81,7 +81,8 @@ Route::prefix('v1')->group(function (): void {
     Route::controller(PaymentController::class)->prefix('payment')->group(function () {
         Route::get('checkout', 'checkout');   // proxy: always gives a fresh Cashfree redirect
         Route::get('callback', 'callback');   // Cashfree return URL after checkout
-        Route::post('webhook', 'webhook');    // Cashfree server-to-server webhook
+        Route::post('webhook', 'webhook')
+            ->middleware(\App\Http\Middleware\PreserveRawBodyForWebhook::class);  // preserve raw body for signature verification
     });
 
     // Payment Routes (auth user's data only)

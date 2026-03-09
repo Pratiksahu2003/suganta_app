@@ -417,26 +417,29 @@ HTML;
      */
     public function webhook(Request $request): JsonResponse
     {
-        $rawBody   = $request->getContent();
+        // Use preserved raw body when available (middleware stores it for signature verification)
+        $rawBody   = $request->attributes->get('raw_body') ?? $request->getContent();
         $signature = $request->header('x-webhook-signature', '');
         $timestamp = $request->header('x-webhook-timestamp', '');
 
         if (!$this->cashfree->verifyWebhookSignature($rawBody, $signature, $timestamp)) {
             Log::warning('Cashfree webhook: signature verification failed', [
-                'ip'        => $request->ip(),
-                'signature' => $signature,
+                'ip'            => $request->ip(),
+                'has_signature' => $signature !== '',
+                'has_timestamp' => $timestamp !== '',
+                'body_length'   => strlen($rawBody),
             ]);
 
             return $this->error('Invalid webhook signature.', Response::HTTP_BAD_REQUEST);
         }
 
-        $payload     = $request->json()->all();
-        $eventType   = $payload['type'] ?? '';
-        $orderData   = $payload['data']['order'] ?? [];
-        $paymentData = $payload['data']['payment'] ?? [];
-        $orderId     = $orderData['order_id'] ?? '';
+        $payload   = $request->json()->all();
+        $eventType = $payload['type'] ?? '';
+        $orderId   = $this->extractOrderIdFromWebhookPayload($payload);
+        $paymentData = $payload['data']['payment'] ?? $payload['data']['charge'] ?? [];
 
         if (empty($orderId)) {
+            Log::info('Cashfree webhook received (no order_id)', ['event_type' => $eventType]);
             return response()->json(['message' => 'Webhook received.'], Response::HTTP_OK);
         }
 
@@ -455,12 +458,44 @@ HTML;
                 $this->registrationPaymentService->handlePaymentFailure($orderId, $paymentData);
                 break;
 
+            case 'PAYMENT_CHARGES_WEBHOOK':
+                // Charge-related events: treat as success when payment_status indicates success
+                $paymentStatus = strtoupper($paymentData['payment_status'] ?? $payload['data']['payment_status'] ?? '');
+                if ($paymentStatus === 'SUCCESS' || $paymentStatus === 'PAID') {
+                    $this->registrationPaymentService->handlePaymentSuccess($orderId, $paymentData);
+                } else {
+                    $this->registrationPaymentService->handlePaymentFailure($orderId, $paymentData);
+                }
+                break;
+
             default:
                 Log::info('Cashfree webhook: unhandled event type', ['type' => $eventType]);
                 break;
         }
 
         return response()->json(['message' => 'Webhook processed.'], Response::HTTP_OK);
+    }
+
+    /**
+     * Extract order_id from Cashfree webhook payload (supports multiple payload structures).
+     */
+    private function extractOrderIdFromWebhookPayload(array $payload): string
+    {
+        $order = $payload['data']['order'] ?? [];
+        if (is_array($order) && !empty($order['order_id'])) {
+            return (string) $order['order_id'];
+        }
+
+        if (!empty($payload['data']['order_id'])) {
+            return (string) $payload['data']['order_id'];
+        }
+
+        $charge = $payload['data']['charge'] ?? [];
+        if (is_array($charge) && !empty($charge['order_id'])) {
+            return (string) $charge['order_id'];
+        }
+
+        return '';
     }
 
     /**
