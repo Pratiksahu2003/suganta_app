@@ -13,8 +13,8 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // Must run first: preserve raw body for webhook signature verification (Cashfree)
-        $middleware->prependToGroup('api', \App\Http\Middleware\PreserveRawBodyForWebhook::class);
+        // Run in global stack so we read php://input BEFORE any other code (Symfony, etc.)
+        $middleware->prepend(\App\Http\Middleware\PreserveRawBodyForWebhook::class);
         $middleware->prependToGroup('api', \App\Http\Middleware\ForceJsonApi::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

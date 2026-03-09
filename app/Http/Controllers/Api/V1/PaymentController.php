@@ -422,7 +422,9 @@ HTML;
         $signature = $request->header('x-webhook-signature', '');
         $timestamp = $request->header('x-webhook-timestamp', '');
 
-        if (!$this->cashfree->verifyWebhookSignature($rawBody, $signature, $timestamp)) {
+        if (config('cashfree.webhook_skip_verify')) {
+            Log::warning('Cashfree webhook: signature verification SKIPPED (CASHFREE_WEBHOOK_SKIP_VERIFY is enabled — disable in production!)');
+        } elseif (!$this->cashfree->verifyWebhookSignature($rawBody, $signature, $timestamp)) {
             Log::warning('Cashfree webhook: signature verification failed', [
                 'ip'            => $request->ip(),
                 'has_signature' => $signature !== '',
