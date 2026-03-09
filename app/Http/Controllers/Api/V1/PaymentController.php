@@ -7,7 +7,6 @@ use App\Models\User;
 use App\Services\CashfreeService;
 use App\Services\RegistrationPaymentService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
@@ -97,19 +96,27 @@ class PaymentController extends BaseApiController
     }
 
     /**
-     * Proxy endpoint: always resolves a fresh Cashfree checkout session and redirects
-     * the browser to Cashfree's hosted payment page.
+     * Proxy endpoint: resolves a fresh Cashfree checkout session and returns an
+     * HTML page that loads the Cashfree JS SDK and calls cashfree.checkout().
      *
-     * By pointing payment links here instead of directly to Cashfree, the links
-     * we hand out to users NEVER expire:
-     *   - If the Cashfree session is still ACTIVE   → redirect immediately.
-     *   - If the Cashfree session has EXPIRED       → create a new order, then redirect.
-     *   - If the payment is already SUCCESS         → return a 200 "already paid" JSON.
-     *   - If the payment is CANCELLED / REFUNDED    → return a 410 Gone.
+     * WHY HTML instead of a raw redirect:
+     *   Cashfree API v2023-08-01+ requires the official JS SDK to properly
+     *   initialise a checkout session.  Navigating to the session URL directly
+     *   (without the SDK) results in "500 / Oops — Something went wrong" on
+     *   Cashfree's page.  The SDK sets the session context; only then does the
+     *   hosted checkout page load correctly.
+     *
+     * The payment links we hand out NEVER expire because:
+     *   - If Cashfree session is ACTIVE  → SDK opens checkout immediately.
+     *   - If Cashfree session EXPIRED    → we create a brand-new order first,
+     *     then the SDK opens the new session.
+     *
+     * Prerequisite: whitelist "www.suganta.in" in your Cashfree Merchant
+     *   Dashboard → Developers → Domain Whitelisting.
      *
      * Route: GET /api/v1/payment/checkout   (public — no auth)
      */
-    public function checkout(Request $request): RedirectResponse|JsonResponse
+    public function checkout(Request $request): \Illuminate\Http\Response|JsonResponse
     {
         $orderId = $request->query('order_id');
 
@@ -131,33 +138,37 @@ class PaymentController extends BaseApiController
         }
 
         if (in_array($payment->status, ['cancelled', 'refunded'], true)) {
-            return $this->error(
-                'This payment link is no longer valid.',
-                Response::HTTP_GONE
-            );
+            return $this->error('This payment link is no longer valid.', Response::HTTP_GONE);
         }
 
         try {
-            $checkoutUrl = $this->registrationPaymentService->getFreshCheckoutUrl($payment);
+            $checkoutData = $this->registrationPaymentService->getFreshCheckoutData($payment);
 
-            if (!$checkoutUrl) {
-                // getFreshCheckoutUrl returns null only when the payment was just completed
-                $payment->refresh();
-                if ($payment->status === 'success') {
-                    return $this->success('Payment already completed.', [
-                        'order_id' => $orderId,
-                        'status'   => 'success',
-                    ]);
-                }
-
+            if (!$checkoutData) {
                 return $this->error(
                     'Unable to load the payment page. Please log in and try again.',
                     Response::HTTP_SERVICE_UNAVAILABLE
                 );
             }
 
-            // Redirect the user's browser directly to Cashfree's hosted checkout page
-            return redirect()->away($checkoutUrl);
+            if (!empty($checkoutData['already_paid'])) {
+                return $this->success('Payment already completed.', [
+                    'order_id' => $orderId,
+                    'status'   => 'success',
+                ]);
+            }
+
+            $sessionId   = $checkoutData['payment_session_id'] ?? '';
+            $checkoutUrl = $checkoutData['checkout_url'] ?? '';
+            $mode        = config('cashfree.is_production') ? 'production' : 'sandbox';
+
+            // Serve an HTML page that loads the Cashfree JS SDK and triggers checkout.
+            // Falls back to a direct redirect if the SDK throws (e.g. domain not yet
+            // whitelisted), so the page is still useful during Cashfree onboarding.
+            $html = $this->buildCheckoutHtml($sessionId, $checkoutUrl, $mode);
+
+            return response($html, Response::HTTP_OK)
+                ->header('Content-Type', 'text/html; charset=UTF-8');
         } catch (\Exception $e) {
             Log::error('Payment checkout proxy failed', [
                 'order_id' => $orderId,
@@ -169,6 +180,146 @@ class PaymentController extends BaseApiController
                 Response::HTTP_SERVICE_UNAVAILABLE
             );
         }
+    }
+
+    /**
+     * Build the HTML page that loads the Cashfree JS SDK and opens the checkout.
+     */
+    private function buildCheckoutHtml(string $sessionId, string $fallbackUrl, string $mode): string
+    {
+        $appName    = e(config('app.name', 'SuGanta'));
+        $sessionId  = e($sessionId);
+        $fallbackUrl = e($fallbackUrl);
+        $mode        = e($mode);
+
+        return <<<HTML
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{$appName} — Secure Payment</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .card {
+            background: #fff;
+            border-radius: 20px;
+            padding: 48px 40px;
+            text-align: center;
+            box-shadow: 0 25px 60px rgba(0,0,0,.25);
+            max-width: 380px;
+            width: 92%;
+        }
+        .brand {
+            font-size: 26px;
+            font-weight: 800;
+            color: #4f46e5;
+            letter-spacing: -0.5px;
+            margin-bottom: 6px;
+        }
+        .sub { color: #6b7280; font-size: 13px; margin-bottom: 36px; }
+        .spinner {
+            width: 52px; height: 52px;
+            border: 5px solid #ede9fe;
+            border-top-color: #4f46e5;
+            border-radius: 50%;
+            animation: spin .75s linear infinite;
+            margin: 0 auto 22px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .msg  { color: #374151; font-size: 15px; margin-bottom: 8px; }
+        .note { color: #9ca3af; font-size: 12px; margin-top: 24px; }
+        .note svg { vertical-align: middle; margin-right: 4px; }
+        .retry-btn {
+            display: none; margin-top: 20px;
+            background: #4f46e5; color: #fff;
+            border: none; border-radius: 10px;
+            padding: 12px 28px; font-size: 15px;
+            cursor: pointer; width: 100%;
+        }
+        .retry-btn:hover { background: #4338ca; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="brand">{$appName}</div>
+    <div class="sub">Secure Payment Gateway</div>
+
+    <div class="spinner" id="spin"></div>
+    <p class="msg" id="msg">Loading payment page&hellip;</p>
+
+    <button class="retry-btn" id="retryBtn" onclick="openCheckout()">
+        Open Payment Page
+    </button>
+
+    <p class="note">
+        <svg width="12" height="14" viewBox="0 0 12 14" fill="none"
+             xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <rect x="1" y="6" width="10" height="8" rx="2"
+                  stroke="#9ca3af" stroke-width="1.5"/>
+            <path d="M3 6V4a3 3 0 0 1 6 0v2" stroke="#9ca3af" stroke-width="1.5"
+                  stroke-linecap="round"/>
+        </svg>
+        Secured by Cashfree Payments
+    </p>
+</div>
+
+<script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
+<script>
+(function () {
+    var SESSION_ID   = "{$sessionId}";
+    var FALLBACK_URL = "{$fallbackUrl}";
+    var MODE         = "{$mode}";
+
+    function showError(txt) {
+        document.getElementById('spin').style.display = 'none';
+        document.getElementById('msg').textContent    = txt;
+        document.getElementById('retryBtn').style.display = 'block';
+    }
+
+    window.openCheckout = function () {
+        document.getElementById('spin').style.display  = 'block';
+        document.getElementById('retryBtn').style.display = 'none';
+        document.getElementById('msg').textContent = 'Loading payment page\u2026';
+
+        try {
+            if (typeof Cashfree === 'undefined') {
+                throw new Error('SDK not loaded');
+            }
+            var cashfree = Cashfree({ mode: MODE });
+            cashfree.checkout({
+                paymentSessionId: SESSION_ID,
+                redirectTarget:   '_self'
+            });
+        } catch (err) {
+            // SDK unavailable (e.g. domain not yet whitelisted) — direct redirect
+            if (FALLBACK_URL) {
+                window.location.href = FALLBACK_URL;
+            } else {
+                showError('Unable to open payment page. Please try again.');
+            }
+        }
+    };
+
+    // Kick off immediately when DOM + SDK are ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', window.openCheckout);
+    } else {
+        window.openCheckout();
+    }
+})();
+</script>
+</body>
+</html>
+HTML;
     }
 
     /**

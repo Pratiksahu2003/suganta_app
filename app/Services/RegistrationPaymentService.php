@@ -300,16 +300,19 @@ class RegistrationPaymentService
     }
 
     /**
-     * Get a guaranteed-fresh Cashfree checkout URL for an existing Payment record.
+     * Get a guaranteed-fresh Cashfree checkout data for an existing Payment record.
      *
      * Called by the proxy checkout endpoint so that any payment link we hand
-     * out never goes stale:
-     *   1. Verify the order is still ACTIVE on Cashfree.
-     *   2. If expired/not found → mark failed, create a brand-new order.
-     *   3. Returns the direct Cashfree hosted-checkout URL, or null when the
-     *      payment has already been completed.
+     * out NEVER goes stale:
+     *   1. Verify the Cashfree order is still ACTIVE.
+     *   2. If expired / 404 → mark failed, create a brand-new order.
+     *   3. Returns ['payment_session_id' => ..., 'checkout_url' => ...], or
+     *      ['already_paid' => true] when the payment was completed, or null
+     *      on unrecoverable error.
+     *
+     * @return array{payment_session_id?: string, checkout_url?: string, already_paid?: bool}|null
      */
-    public function getFreshCheckoutUrl(Payment $payment): ?string
+    public function getFreshCheckoutData(Payment $payment): ?array
     {
         // ── Step 1: verify with Cashfree ──────────────────────────────────────
         try {
@@ -319,20 +322,24 @@ class RegistrationPaymentService
             // Race condition: paid between requests — activate user
             if ($this->cashfree->isOrderPaid($freshOrder)) {
                 $this->handlePaymentSuccess($payment->order_id, []);
-                return null;
+                return ['already_paid' => true];
             }
 
             if ($orderStatus === 'ACTIVE') {
-                // Order still live — persist the refreshed session and return URL
+                // Order still live — persist the refreshed session
                 $payment->update(['gateway_response' => $freshOrder]);
-                return $this->cashfree->getCheckoutUrl($freshOrder);
+
+                return [
+                    'payment_session_id' => $freshOrder['payment_session_id'] ?? null,
+                    'checkout_url'       => $this->cashfree->getCheckoutUrl($freshOrder),
+                ];
             }
 
-            // EXPIRED / CANCELLED — mark failed so a new one will be created
+            // EXPIRED / CANCELLED — mark failed so a new one will be created below
             $payment->update(['status' => 'failed', 'gateway_response' => $freshOrder]);
         } catch (\Exception $e) {
             // 404 or auth error → the order never existed on production
-            $this->logError('getFreshCheckoutUrl: Cashfree getOrder failed', [
+            $this->logError('getFreshCheckoutData: Cashfree getOrder failed', [
                 'payment_id' => $payment->id,
                 'order_id'   => $payment->order_id,
                 'error'      => $e->getMessage(),
@@ -344,7 +351,7 @@ class RegistrationPaymentService
         $user = $payment->user;
 
         if (!$user) {
-            $this->logError('getFreshCheckoutUrl: user not found for payment', [
+            $this->logError('getFreshCheckoutData: user not found for payment', [
                 'payment_id' => $payment->id,
             ]);
             return null;
@@ -352,7 +359,14 @@ class RegistrationPaymentService
 
         $result = $this->getOrCreateCheckoutUrl($user, 'web');
 
-        return $result['checkout_url'] ?? null;
+        if (empty($result['checkout_url'])) {
+            return null;
+        }
+
+        return [
+            'payment_session_id' => $result['payment_session_id'] ?? null,
+            'checkout_url'       => $result['checkout_url'],
+        ];
     }
 
     private function logInfo(string $message, array $context = []): void
