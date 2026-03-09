@@ -4,14 +4,22 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Models\Payment;
 use App\Models\User;
+use App\Services\CashfreeService;
+use App\Services\RegistrationPaymentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
 use Symfony\Component\HttpFoundation\Response;
 
 class PaymentController extends BaseApiController
 {
+    public function __construct(
+        protected CashfreeService $cashfree,
+        protected RegistrationPaymentService $registrationPaymentService
+    ) {}
+
     /**
      * Get authenticated user's payment history.
      */
@@ -28,7 +36,7 @@ class PaymentController extends BaseApiController
             $query->where('status', $request->string('status'));
         }
 
-        $perPage = min((int) $request->get('per_page', 15), 50);
+        $perPage  = min((int) $request->get('per_page', 15), 50);
         $payments = $query->paginate($perPage);
 
         $data = $payments->through(function (Payment $payment) {
@@ -36,20 +44,20 @@ class PaymentController extends BaseApiController
         });
 
         return $this->success('Payment history retrieved successfully.', [
-            'data' => $data->items(),
-            'meta' => [
+            'data'  => $data->items(),
+            'meta'  => [
                 'current_page' => $data->currentPage(),
-                'last_page' => $data->lastPage(),
-                'per_page' => $data->perPage(),
-                'total' => $data->total(),
-                'from' => $data->firstItem(),
-                'to' => $data->lastItem(),
+                'last_page'    => $data->lastPage(),
+                'per_page'     => $data->perPage(),
+                'total'        => $data->total(),
+                'from'         => $data->firstItem(),
+                'to'           => $data->lastItem(),
             ],
             'links' => [
                 'first' => $data->url(1),
-                'last' => $data->url($data->lastPage()),
-                'prev' => $data->previousPageUrl(),
-                'next' => $data->nextPageUrl(),
+                'last'  => $data->url($data->lastPage()),
+                'prev'  => $data->previousPageUrl(),
+                'next'  => $data->nextPageUrl(),
             ],
         ]);
     }
@@ -81,25 +89,168 @@ class PaymentController extends BaseApiController
         $invoiceUrl = $this->generateInvoiceUrl($payment->order_id);
 
         return $this->success('Invoice URL generated successfully.', [
-            'order_id' => $payment->order_id,
+            'order_id'    => $payment->order_id,
             'invoice_url' => $invoiceUrl,
-            'expires_at' => now()->addDays(config('invoice.expires_days', 7))->toIso8601String(),
+            'expires_at'  => now()->addDays(config('invoice.expires_days', 7))->toIso8601String(),
         ]);
     }
 
     /**
-     * Format payment for API response.
+     * Handle Cashfree payment return URL (called after user completes / abandons payment).
+     *
+     * Cashfree redirects the user's browser here after the hosted checkout flow.
+     * We verify the current order status with Cashfree and return a JSON status
+     * that the frontend / mobile app can use to navigate the user to the right screen.
+     *
+     * Route: GET /api/v1/payment/callback   (public — no auth)
+     */
+    public function callback(Request $request): JsonResponse
+    {
+        $orderId = $request->query('order_id');
+
+        if (!$orderId) {
+            return $this->error('Missing order_id parameter.', Response::HTTP_BAD_REQUEST);
+        }
+
+        $payment = Payment::where('order_id', $orderId)->first();
+
+        if (!$payment) {
+            return $this->notFound('Payment record not found.');
+        }
+
+        // Already in a terminal state — return immediately (idempotent)
+        if (in_array($payment->status, ['success', 'failed', 'cancelled', 'refunded'], true)) {
+            return $this->success('Payment status retrieved.', [
+                'order_id'     => $orderId,
+                'status'       => $payment->status,
+                'processed_at' => $payment->processed_at?->toIso8601String(),
+            ]);
+        }
+
+        // Fetch live order status from Cashfree to check whether payment went through
+        try {
+            $orderData   = $this->cashfree->getOrder($orderId);
+            $orderStatus = strtoupper($orderData['order_status'] ?? '');
+
+            if ($orderStatus === 'PAID') {
+                // Fetch payment-level details for the reference ID / method
+                $cfPaymentData = [];
+                try {
+                    $payments      = $this->cashfree->getOrderPayments($orderId);
+                    $cfPaymentData = collect($payments)
+                        ->firstWhere('payment_status', 'SUCCESS') ?? [];
+                } catch (\Exception $e) {
+                    Log::warning('callback: could not fetch order payments from Cashfree', [
+                        'order_id' => $orderId,
+                        'error'    => $e->getMessage(),
+                    ]);
+                }
+
+                $this->registrationPaymentService->handlePaymentSuccess($orderId, $cfPaymentData);
+
+                return $this->success('Payment successful.', [
+                    'order_id' => $orderId,
+                    'status'   => 'success',
+                ]);
+            }
+
+            if (in_array($orderStatus, ['EXPIRED', 'CANCELLED'], true)) {
+                $this->registrationPaymentService->handlePaymentFailure($orderId, $orderData);
+
+                return $this->success('Payment could not be completed.', [
+                    'order_id' => $orderId,
+                    'status'   => 'failed',
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::error('Payment callback verification failed', [
+                'order_id' => $orderId,
+                'error'    => $e->getMessage(),
+            ]);
+        }
+
+        // Payment still pending — return current local status
+        return $this->success('Payment is pending.', [
+            'order_id' => $orderId,
+            'status'   => $payment->status,
+        ]);
+    }
+
+    /**
+     * Handle Cashfree webhook notifications (server-to-server, background).
+     *
+     * Verifies the HMAC-SHA256 signature before processing any event.
+     *
+     * Handled events:
+     *   PAYMENT_SUCCESS_WEBHOOK
+     *   PAYMENT_FAILED_WEBHOOK
+     *   PAYMENT_USER_DROPPED_WEBHOOK
+     *
+     * Route: POST /api/v1/payment/webhook   (public — no auth)
+     */
+    public function webhook(Request $request): JsonResponse
+    {
+        $rawBody   = $request->getContent();
+        $signature = $request->header('x-webhook-signature', '');
+        $timestamp = $request->header('x-webhook-timestamp', '');
+
+        if (!$this->cashfree->verifyWebhookSignature($rawBody, $signature, $timestamp)) {
+            Log::warning('Cashfree webhook: signature verification failed', [
+                'ip'        => $request->ip(),
+                'signature' => $signature,
+            ]);
+
+            return $this->error('Invalid webhook signature.', Response::HTTP_BAD_REQUEST);
+        }
+
+        $payload     = $request->json()->all();
+        $eventType   = $payload['type'] ?? '';
+        $orderData   = $payload['data']['order'] ?? [];
+        $paymentData = $payload['data']['payment'] ?? [];
+        $orderId     = $orderData['order_id'] ?? '';
+
+        if (empty($orderId)) {
+            return response()->json(['message' => 'Webhook received.'], Response::HTTP_OK);
+        }
+
+        Log::info('Cashfree webhook received', [
+            'event_type' => $eventType,
+            'order_id'   => $orderId,
+        ]);
+
+        switch ($eventType) {
+            case 'PAYMENT_SUCCESS_WEBHOOK':
+                $this->registrationPaymentService->handlePaymentSuccess($orderId, $paymentData);
+                break;
+
+            case 'PAYMENT_FAILED_WEBHOOK':
+            case 'PAYMENT_USER_DROPPED_WEBHOOK':
+                $this->registrationPaymentService->handlePaymentFailure($orderId, $paymentData);
+                break;
+
+            default:
+                Log::info('Cashfree webhook: unhandled event type', ['type' => $eventType]);
+                break;
+        }
+
+        return response()->json(['message' => 'Webhook processed.'], Response::HTTP_OK);
+    }
+
+    /**
+     * Format a payment record for API response.
      */
     private function formatPaymentForResponse(Payment $payment): array
     {
         $data = [
-            'id' => $payment->id,
-            'order_id' => $payment->order_id,
+            'id'           => $payment->id,
+            'order_id'     => $payment->order_id,
             'reference_id' => $payment->reference_id,
-            'currency' => $payment->currency,
-            'amount' => (float) $payment->amount,
-            'status' => $payment->status,
-            'created_at' => $payment->created_at->toIso8601String(),
+            'currency'     => $payment->currency,
+            'amount'       => (float) $payment->amount,
+            'status'       => $payment->status,
+            'type'         => $payment->meta['type'] ?? null,
+            'description'  => $payment->meta['description'] ?? null,
+            'created_at'   => $payment->created_at->toIso8601String(),
             'processed_at' => $payment->processed_at?->toIso8601String(),
         ];
 
@@ -115,11 +266,9 @@ class PaymentController extends BaseApiController
      */
     private function generateInvoiceUrl(string $orderId): string
     {
-        $baseUrl = rtrim(config('invoice.base_url'), '/');
+        $baseUrl    = rtrim(config('invoice.base_url'), '/');
         $expiration = now()->addDays(config('invoice.expires_days', 7));
-        $path = '/payment/invoice/' . $orderId;
 
-        // Use Laravel's signed URL generation with forced root URL
         $originalUrl = URL::to('');
         URL::forceRootUrl($baseUrl);
         URL::forceScheme(parse_url($baseUrl, PHP_URL_SCHEME) ?: 'https');

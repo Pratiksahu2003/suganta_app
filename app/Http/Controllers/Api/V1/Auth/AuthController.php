@@ -148,11 +148,30 @@ class AuthController extends Controller
         try {
             $result = $this->authService->verifyLogin($request->all(), $request);
 
+            if (isset($result['requires_registration_payment']) && $result['requires_registration_payment']) {
+                return $this->coreResponse(
+                    $result['message'] ?? 'Registration fee payment is required to complete login.',
+                    $result,
+                    200,
+                    false
+                );
+            }
+
             return $this->success('Login successful', $result);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->validationError($e->errors(), 'Verification failed');
         } catch (\Exception $e) {
             Log::error('API Login Verification failed: ' . $e->getMessage());
+
+            $statusCode = $e->getCode();
+            if ($statusCode < 100 || $statusCode > 599) {
+                $statusCode = 500;
+            }
+
+            if ($statusCode === 403) {
+                return $this->forbidden($e->getMessage());
+            }
+
             return $this->serverError('Verification failed. Please try again.', $e);
         }
     }

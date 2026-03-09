@@ -104,10 +104,18 @@ class AuthService
                     Log::error('OTP sending failed during registration: ' . $e->getMessage());
                 }
 
+                $requiresPayment   = in_array($user->role, config('registration.payment.required_for_roles', []), true);
+                $registrationCharges = $requiresPayment
+                    ? config("registration.charges.{$user->role}")
+                    : null;
+
                 return [
-                    'user' => $user->only(['id', 'name', 'email', 'role' ,'email_verified_at', 'phone_verified_at' ,'registration_fee_status']),
-                    'token' => $token,
-                    'token_type' => 'Bearer'
+                    'user'                         => $user->only(['id', 'name', 'email', 'role', 'email_verified_at', 'phone_verified_at', 'registration_fee_status']),
+                    'token'                        => $token,
+                    'token_type'                   => 'Bearer',
+                    'next_step'                    => 'email_verification',
+                    'requires_registration_payment' => $requiresPayment,
+                    'registration_charges'         => $registrationCharges,
                 ];
             } catch (\Exception $e) {
                 Log::error('AuthService Registration failed: ' . $e->getMessage(), [
@@ -138,14 +146,12 @@ class AuthService
             if ($type === 'email') {
                 $user = User::where('email', $identifier)->first();
             } elseif ($type === 'phone') {
-                // Normalize to E.164 before lookup so input formats like local numbers work
-                $normalizedPhone = $this->inputDetectionService->formatPhone($identifier);
-                if (!$normalizedPhone) {
+                if (!$this->inputDetectionService->isValidPhone($identifier)) {
                     throw ValidationException::withMessages([
                         'email' => ['Invalid phone number format'],
                     ]);
                 }
-                $user = User::where('phone', $normalizedPhone)->first();
+                $user = User::where('phone', $identifier)->first();
             }
 
             if (!$user || !Hash::check($credentials['password'], $user->password)) {
@@ -339,10 +345,32 @@ class AuthService
             ]);
         }
         
-        // Check active status after verification to prevent enumeration?
-        // Or before? verifyOtp doesn't check active.
+        // Check active status after OTP verification
         if (!$user->is_active) {
             throw new \Exception('Account is deactivated', 403);
+        }
+
+        // Check registration fee — same gate as password-based login
+        $registrationStatus = $user->registration_fee_status ?? null;
+        if ($registrationStatus !== 'paid' && $registrationStatus !== 'not_required' && $user->role !== 'student') {
+            $paymentResult = $this->registrationPaymentService->getOrCreateCheckoutUrl($user, 'api');
+
+            if (!empty($paymentResult['checkout_url'])) {
+                return [
+                    'requires_registration_payment' => true,
+                    'payment_link'                  => $paymentResult['checkout_url'],
+                    'order_id'                      => $paymentResult['order_id'] ?? null,
+                    'actual_price'                  => $paymentResult['actual_price'] ?? null,
+                    'discounted_price'              => $paymentResult['discounted_price'] ?? null,
+                    'description'                   => $paymentResult['description'] ?? null,
+                    'role'                          => $user->role,
+                    'message'                       => 'Registration fee payment is required to complete login.',
+                ];
+            }
+
+            if (!($paymentResult['success'] ?? false) && !empty($paymentResult['message'])) {
+                throw new \Exception($paymentResult['message'], 403);
+            }
         }
 
         // Login Successful

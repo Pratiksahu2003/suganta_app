@@ -77,6 +77,12 @@ Route::prefix('v1')->group(function (): void {
         Route::get('{supportTicket}/replies/{reply}/attachment', [SupportTicketController::class, 'downloadReplyAttachment']);
     });
 
+    // Payment — public routes (Cashfree callbacks / webhooks, no auth required)
+    Route::controller(PaymentController::class)->prefix('payment')->group(function () {
+        Route::get('callback', 'callback');
+        Route::post('webhook', 'webhook');
+    });
+
     // Payment Routes (auth user's data only)
     Route::middleware('auth:sanctum')->prefix('payments')->controller(PaymentController::class)->group(function () {
         Route::get('/', 'index');
