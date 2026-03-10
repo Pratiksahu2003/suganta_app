@@ -300,6 +300,148 @@ class RegistrationPaymentService
     }
 
     /**
+     * Handle refund status updates for any order.
+     * Updates the payment record and — for registration payments — updates user status accordingly.
+     */
+    public function handleRefundStatus(string $orderId, array $paymentData = []): bool
+    {
+        $payment = Payment::where('order_id', $orderId)->first();
+
+        if (!$payment) {
+            $this->logError('handleRefundStatus: payment record not found', ['order_id' => $orderId]);
+            return false;
+        }
+
+        // Extract refund status from payment data
+        $refundStatus = strtoupper($paymentData['refund_status'] ?? $paymentData['status'] ?? '');
+        $refundAmount = $paymentData['refund_amount'] ?? $paymentData['amount'] ?? 0;
+        
+        // Handle different refund statuses
+        switch ($refundStatus) {
+            case 'SUCCESS':
+            case 'PROCESSED':
+            case 'COMPLETED':
+                return $this->processRefundSuccess($payment, $paymentData, $refundAmount);
+                
+            case 'FAILED':
+            case 'REJECTED':
+                return $this->processRefundFailure($payment, $paymentData);
+                
+            case 'PENDING':
+            case 'PROCESSING':
+                return $this->processRefundPending($payment, $paymentData);
+                
+            default:
+                $this->logError('handleRefundStatus: unknown refund status', [
+                    'order_id' => $orderId,
+                    'refund_status' => $refundStatus,
+                    'payment_data' => $paymentData
+                ]);
+                return false;
+        }
+    }
+
+    /**
+     * Process successful refund
+     */
+    private function processRefundSuccess(Payment $payment, array $paymentData, float $refundAmount): bool
+    {
+        // Idempotent — already processed
+        if ($payment->status === 'refunded') {
+            return true;
+        }
+
+        $payment->update([
+            'status' => 'refunded',
+            'processed_at' => now(),
+            'gateway_response' => array_merge(
+                $payment->gateway_response ?? [],
+                [
+                    'refund_data' => $paymentData,
+                    'refund_amount' => $refundAmount,
+                    'refund_processed_at' => now()->toISOString()
+                ]
+            ),
+        ]);
+
+        // Handle registration payment refund
+        if (($payment->meta['type'] ?? '') === 'registration') {
+            $user = $payment->user;
+
+            if ($user) {
+                // Update user registration fee status
+                $user->update([
+                    'registration_fee_status' => 'refunded',
+                    'is_active' => false, // Deactivate user account
+                    'verification_status' => 'pending', // Reset verification status
+                ]);
+
+                $this->logInfo('Registration payment refunded — user deactivated', [
+                    'order_id' => $payment->order_id,
+                    'user_id' => $user->id,
+                    'role' => $user->role,
+                    'refund_amount' => $refundAmount,
+                ]);
+            }
+        }
+
+        $this->logInfo('Refund processed successfully', [
+            'order_id' => $payment->order_id,
+            'payment_id' => $payment->id,
+            'refund_amount' => $refundAmount,
+        ]);
+
+        return true;
+    }
+
+    /**
+     * Process failed refund
+     */
+    private function processRefundFailure(Payment $payment, array $paymentData): bool
+    {
+        $payment->update([
+            'gateway_response' => array_merge(
+                $payment->gateway_response ?? [],
+                [
+                    'refund_data' => $paymentData,
+                    'refund_failed_at' => now()->toISOString()
+                ]
+            ),
+        ]);
+
+        $this->logError('Refund processing failed', [
+            'order_id' => $payment->order_id,
+            'payment_id' => $payment->id,
+            'refund_data' => $paymentData,
+        ]);
+
+        return true;
+    }
+
+    /**
+     * Process pending refund
+     */
+    private function processRefundPending(Payment $payment, array $paymentData): bool
+    {
+        $payment->update([
+            'gateway_response' => array_merge(
+                $payment->gateway_response ?? [],
+                [
+                    'refund_data' => $paymentData,
+                    'refund_pending_at' => now()->toISOString()
+                ]
+            ),
+        ]);
+
+        $this->logInfo('Refund processing pending', [
+            'order_id' => $payment->order_id,
+            'payment_id' => $payment->id,
+        ]);
+
+        return true;
+    }
+
+    /**
      * Get a guaranteed-fresh Cashfree checkout data for an existing Payment record.
      *
      * Called by the proxy checkout endpoint so that any payment link we hand

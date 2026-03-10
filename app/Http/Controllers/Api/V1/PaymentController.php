@@ -483,6 +483,10 @@ HTML;
                 }
                 break;
 
+            case 'REFUND_STATUS_WEBHOOK':
+                $this->registrationPaymentService->handleRefundStatus($orderId, $paymentData);
+                break;
+
             default:
                 Log::info('Cashfree webhook: unhandled event type', ['type' => $eventType]);
                 break;
