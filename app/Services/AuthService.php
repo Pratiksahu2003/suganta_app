@@ -16,6 +16,37 @@ use Illuminate\Validation\ValidationException;
 
 class AuthService
 {
+    // Constants
+    private const TRUSTED_DEVICE_CACHE_DAYS = 30;
+    private const TRUSTED_DEVICE_TOKEN_LENGTH = 64;
+    private const DEFAULT_DEVICE_NAME = 'Unknown Device';
+    private const TOKEN_TYPE = 'Bearer';
+    
+    // Login methods
+    private const LOGIN_METHOD_REGISTRATION = 'api_registration';
+    private const LOGIN_METHOD_TRUSTED = 'api_email_password_trusted';
+    private const LOGIN_METHOD_OTP = 'api_otp_verification';
+    
+    // Registration fee statuses
+    private const FEE_STATUS_PAID = 'paid';
+    private const FEE_STATUS_NOT_REQUIRED = 'not_required';
+    
+    // User roles
+    private const ROLE_STUDENT = 'student';
+    
+    // Verification statuses
+    private const VERIFICATION_PENDING = 'pending';
+    
+    // Error messages
+    private const ERROR_INVALID_CREDENTIALS = 'Invalid credentials';
+    private const ERROR_ACCOUNT_DEACTIVATED = 'Account is deactivated';
+    private const ERROR_EMAIL_NOT_VERIFIED = 'Email not verified. Please verify your email before logging in.';
+    private const ERROR_USER_NOT_FOUND = 'User not found';
+    private const ERROR_INVALID_OTP = 'Invalid or expired OTP';
+    private const ERROR_INVALID_FORMAT = 'Invalid email or phone number format';
+    private const ERROR_INVALID_PHONE_FORMAT = 'Invalid phone number format';
+    private const ERROR_INVALID_IDENTIFIER_FORMAT = 'Invalid identifier format';
+    
     protected SessionService $sessionService;
     protected UserActivityNotificationService $userActivityService;
     protected PasswordNotificationService $passwordNotificationService;
@@ -40,7 +71,12 @@ class AuthService
     }
 
     /**
-     * Register a new user
+     * Register a new user with comprehensive validation and setup
+     * 
+     * @param array $data Registration data containing user information
+     * @param Request $request HTTP request object for session tracking
+     * @return array Registration response with user data and token
+     * @throws \Exception When registration fails
      */
     public function register(array $data, Request $request): array
     {
@@ -54,7 +90,7 @@ class AuthService
                     'role' => $data['role'],
                     'phone' => $data['phone'] ?? null,
                     'is_active' => true,
-                    'verification_status' => 'pending',
+                    'verification_status' => self::VERIFICATION_PENDING,
                     'referred_by' => $data['referral_code'] ?? null,
                     'preferences' => [
                         'first_name' => $data['first_name'],
@@ -66,7 +102,7 @@ class AuthService
                 $this->assignUserRole($user, $data['role']);
 
                 // Create token
-                $deviceName = $data['device_name'] ?? ($request->userAgent() ?? 'Unknown Device');
+                $deviceName = $data['device_name'] ?? ($request->userAgent() ?? self::DEFAULT_DEVICE_NAME);
                 $token = $user->createToken($deviceName)->plainTextToken;
 
                 // Create Profile
@@ -77,50 +113,35 @@ class AuthService
                     'display_name' => $data['first_name'] . ' ' . $data['last_name'],
                 ]);
 
-                // Create session record (Fail gracefully if session creation fails)
-                try {
-                    $this->sessionService->createSession($user, $request);
-                } catch (\Exception $e) {
-                    Log::error('Session creation failed during registration: ' . $e->getMessage());
-                    // We continue even if session creation fails, as it's not critical for account creation
-                }
+                // Handle optional registration tasks gracefully
+                $this->executeGracefully(
+                    fn() => $this->sessionService->createSession($user, $request),
+                    'Session creation failed during registration'
+                );
 
-                // Send registration notification (Fail gracefully)
-                try {
-                    $this->userActivityService->loginSuccessful($user, [
-                        'login_method' => 'api_registration'
-                    ]);
-                } catch (\Exception $e) {
-                    Log::error('Activity logging failed during registration: ' . $e->getMessage());
-                }
+                $this->executeGracefully(
+                    fn() => $this->userActivityService->loginSuccessful($user, [
+                        'login_method' => self::LOGIN_METHOD_REGISTRATION
+                    ]),
+                    'Activity logging failed during registration'
+                );
 
-                // Send OTP (Fail gracefully but log error)
-                try {
+                $this->executeGracefully(function() use ($user) {
                     $this->otpService->sendOtp($user, 'email');
                     if ($user->phone) {
                         $this->otpService->sendOtp($user, 'phone');
                     }
-                } catch (\Exception $e) {
-                    Log::error('OTP sending failed during registration: ' . $e->getMessage());
-                }
+                }, 'OTP sending failed during registration');
 
-                $requiresPayment   = in_array($user->role, config('registration.payment.required_for_roles', []), true);
+                $requiresPayment = in_array($user->role, config('registration.payment.required_for_roles', []), true);
                 $registrationCharges = $requiresPayment
                     ? config("registration.charges.{$user->role}")
                     : null;
 
-                return [
-                    'user'                         => $user->only(['id', 'name', 'email', 'role', 'email_verified_at', 'phone_verified_at', 'registration_fee_status']),
-                    'token'                        => $token,
-                    'token_type'                   => 'Bearer',
-                    'next_step'                    => 'email_verification',
-                    'requires_registration_payment' => $requiresPayment,
-                    'registration_charges'         => $registrationCharges,
-                ];
+                return $this->buildRegistrationResponse($user, $token, $requiresPayment, $registrationCharges);
             } catch (\Exception $e) {
-                Log::error('AuthService Registration failed: ' . $e->getMessage(), [
-                    'email' => $data['email'] ?? 'unknown',
-                    'trace' => $e->getTraceAsString()
+                $this->handleAuthError($e, 'Registration', [
+                    'email' => $data['email'] ?? 'unknown'
                 ]);
                 throw $e; // Transaction will rollback
             }
@@ -128,7 +149,13 @@ class AuthService
     }
 
     /**
-     * Login user
+     * Authenticate user login with multi-factor authentication support
+     * 
+     * @param array $credentials Login credentials (email/phone and password)
+     * @param Request $request HTTP request object for device tracking
+     * @return array Login response with user data, token, or payment/OTP requirements
+     * @throws ValidationException When credentials are invalid
+     * @throws \Exception When account is deactivated or other login issues occur
      */
     public function login(array $credentials, Request $request): array
     {
@@ -138,163 +165,67 @@ class AuthService
 
             if (!$type) {
                 throw ValidationException::withMessages([
-                    'email' => ['Invalid email or phone number format'],
+                    'email' => [self::ERROR_INVALID_FORMAT],
                 ]);
             }
 
-            $user = null;
-            if ($type === 'email') {
-                $user = User::where('email', $identifier)->first();
-            } elseif ($type === 'phone') {
-                if (!$this->inputDetectionService->isValidPhone($identifier)) {
-                    throw ValidationException::withMessages([
-                        'email' => ['Invalid phone number format'],
-                    ]);
-                }
-                $user = User::where('phone', $identifier)->first();
-            }
+            $user = $this->findUserByIdentifier($identifier);
 
             if (!$user || !Hash::check($credentials['password'], $user->password)) {
                 if ($user) {
                     $this->userActivityService->loginFailed($user, 'Invalid password via API');
                 }
                 throw ValidationException::withMessages([
-                    'email' => ['Invalid credentials'],
+                    'email' => [self::ERROR_INVALID_CREDENTIALS],
                 ]);
             }
 
-            if (!$user->is_active) {
-                throw new \Exception('Account is deactivated', 403);
+            $this->validateUserAccount($user);
+            $this->validateEmailVerification($user);
+
+            // Check registration payment requirements
+            $paymentResponse = $this->checkRegistrationPayment($user);
+            if ($paymentResponse) {
+                return $paymentResponse;
             }
 
-            if ($user->email_verified_at === null) {
-                throw new \Exception('Email not verified. Please verify your email before logging in.', 403);
+            // Check if device is trusted
+            if (!$this->isTrustedDevice($user, $request)) {
+                return $this->handleOtpRequirement($user, $identifier, $type);
             }
 
-            // Check registration fee
-            $registrationStatus = $user->registration_fee_status ?? null;
-            if ($registrationStatus !== 'paid' && $registrationStatus !== 'not_required' && $user->role != 'student') {
-                $paymentResult = $this->registrationPaymentService->getOrCreateCheckoutUrl($user, 'api');
-
-                if (!empty($paymentResult['checkout_url'])) {
-                    $orderId = $paymentResult['order_id'] ?? '';
-                    return [
-                        'requires_registration_payment' => true,
-                        'payment_link'                  => $this->buildProxyPaymentUrl($orderId),
-                        'payment_session_id'            => $paymentResult['payment_session_id'] ?? null,
-                        'order_id'                      => $orderId,
-                        'actual_price'                  => $paymentResult['actual_price'] ?? null,
-                        'discounted_price'              => $paymentResult['discounted_price'] ?? null,
-                        'description'                   => $paymentResult['description'] ?? null,
-                        'role'                          => $user->role,
-                        'message'                       => 'Registration fee payment is required to complete login.',
-                    ];
-                }
-
-                if (!($paymentResult['success'] ?? false) && !empty($paymentResult['message'])) {
-                    throw new \Exception($paymentResult['message'], 403);
-                }
-            }
-
-            // Trusted Device Check
-            $deviceToken = $request->header('X-Device-Token');
-            $isTrusted = false;
-            if ($deviceToken) {
-                // Check cache for trusted device token
-                $cacheKey = 'trusted_device:' . $user->id . ':' . $deviceToken;
-                if (\Illuminate\Support\Facades\Cache::has($cacheKey)) {
-                    $isTrusted = true;
-                }
-            }
-
-            // If not trusted, require OTP (unless disabled via config, but requirement says "After password verification, trigger OTP")
-            if (!$isTrusted) {
-                // Send OTP
-                // Use detected type as preference, or fallback to email if phone not available
-                $otpType = $type;
-                if ($type === 'phone' && empty($user->phone)) {
-                    $otpType = 'email';
-                }
-                
-                $this->otpService->sendOtp($user, $otpType);
-
-                return [
-                    'requires_otp' => true,
-                    'identifier' => $identifier,
-                    'type' => $otpType, // Tell frontend which OTP to expect
-                    'message' => "OTP sent to your {$otpType}. Please verify to complete login."
-                ];
-            }
-
-            // If Trusted, proceed to login
-            $deviceName = $credentials['device_name'] ?? $request->ip();
-            $token = $user->createToken($deviceName)->plainTextToken;
-
-            $this->sessionService->createSession($user, $request);
-            $this->checkUnusualLoginLocation($user);
-            $this->checkNewDevice($user);
-
-            $this->userActivityService->loginSuccessful($user, [
-                'login_method' => 'api_email_password_trusted',
-                'device_name' => $deviceName
-            ]);
-
-            $responseData = [
-                'user' => $user->only(['id', 'name', 'email', 'role']),
-                'email_verified_at' => $user->email_verified_at,
-                'registration_fee_status' => in_array($user->registration_fee_status, ['paid', 'not_required']),
-                'token' => $token,
-                'token_type' => 'Bearer'
-            ];
-
-            // Add phone_verified_at if it exists
-            if ($user->phone) {
-                $responseData['phone_verified_at'] = $user->phone_verified_at ?? null;
-            }
-
-            return $responseData;
+            // Complete trusted device login
+            return $this->completeTrustedLogin($user, $credentials, $request);
+            
         } catch (\Exception $e) {
-            Log::error('AuthService Login failed: ' . $e->getMessage(), [
-                'email' => $credentials['email'] ?? 'unknown',
-                'trace' => $e->getTraceAsString()
+            $this->handleAuthError($e, 'Login', [
+                'email' => $credentials['email'] ?? 'unknown'
             ]);
             throw $e;
         }
     }
 
+    /**
+     * Send OTP for login verification
+     * 
+     * @param string $identifier User email or phone number
+     * @return array Success response with OTP details
+     * @throws ValidationException When identifier format is invalid
+     * @throws \Exception When user not found or account deactivated
+     */
     public function sendLoginOtp(string $identifier): array
     {
         $type = $this->inputDetectionService->detectType($identifier);
 
         if (!$type) {
-             throw ValidationException::withMessages([
-                'identifier' => ['Invalid identifier format'],
+            throw ValidationException::withMessages([
+                'identifier' => [self::ERROR_INVALID_IDENTIFIER_FORMAT],
             ]);
         }
 
-        $user = null;
-        if ($type === 'email') {
-            $user = User::where('email', $identifier)->first();
-        } elseif ($type === 'phone') {
-            $normalizedPhone = $this->inputDetectionService->isValidPhone($identifier);
-            if (!$normalizedPhone) {
-                throw ValidationException::withMessages([
-                    'identifier' => ['Invalid phone number format'],
-                ]);
-            }
-           
-            $user = User::where('phone', $identifier)->first();
-        }
+        $user = $this->getUserByIdentifier($identifier);
+        $this->validateUserAccount($user);
 
-        if (!$user) {
-             throw new \Exception('User not found', 404);
-        }
-
-        if (!$user->is_active) {
-            throw new \Exception('Account is deactivated', 403);
-        }
-
-        // Send OTP
         $this->otpService->sendOtp($user, $type);
 
         return [
@@ -306,78 +237,37 @@ class AuthService
     }
 
     /**
-     * Verify Login OTP and issue token
+     * Verify Login OTP and complete authentication process
+     * 
+     * @param array $data OTP verification data (identifier, otp, device_name, remember_device)
+     * @param Request $request HTTP request object for session tracking
+     * @return array Login response with user data, token, or payment requirements
+     * @throws ValidationException When OTP is invalid or identifier format is wrong
+     * @throws \Exception When account issues prevent login
      */
     public function verifyLogin(array $data, Request $request): array
     {
         $identifier = $data['identifier'];
         $otp = $data['otp'];
+        
+        $user = $this->getUserByIdentifier($identifier);
+        
         $type = $this->inputDetectionService->detectType($identifier);
-
-        if (!$type) {
-             throw ValidationException::withMessages([
-                'identifier' => ['Invalid identifier format'],
-            ]);
-        }
-
-        $user = null;
-        if ($type === 'email') {
-            $user = User::where('email', $identifier)->first();
-        } elseif ($type === 'phone') {
-            $normalizedPhone = $this->inputDetectionService->isValidPhone($identifier);
-            if (!$normalizedPhone) {
-                throw ValidationException::withMessages([
-                    'identifier' => ['Invalid phone number format'],
-                ]);
-            }
-            $user = User::where('phone', $identifier)->first();
-        }
-
-        if (!$user) {
-             throw ValidationException::withMessages([
-                'identifier' => ['User not found'],
-            ]);
-        }
-
-        // Verify OTP
-        // Note: verifyOtp checks expiry, usage, and increments attempts
         if (!$this->otpService->verifyOtp($user, $otp, $type)) {
-             throw ValidationException::withMessages([
-                'otp' => ['Invalid or expired OTP'],
+            throw ValidationException::withMessages([
+                'otp' => [self::ERROR_INVALID_OTP],
             ]);
         }
         
-        // Check active status after OTP verification
-        if (!$user->is_active) {
-            throw new \Exception('Account is deactivated', 403);
+        $this->validateUserAccount($user);
+
+        // Check registration payment requirements
+        $paymentResponse = $this->checkRegistrationPayment($user);
+        if ($paymentResponse) {
+            return $paymentResponse;
         }
 
-        // Check registration fee — same gate as password-based login
-        $registrationStatus = $user->registration_fee_status ?? null;
-        if ($registrationStatus !== 'paid' && $registrationStatus !== 'not_required' && $user->role !== 'student') {
-            $paymentResult = $this->registrationPaymentService->getOrCreateCheckoutUrl($user, 'api');
-
-            if (!empty($paymentResult['checkout_url'])) {
-                $orderId = $paymentResult['order_id'] ?? '';
-                return [
-                    'requires_registration_payment' => true,
-                    'payment_link'                  => $this->buildProxyPaymentUrl($orderId),
-                    'payment_session_id'            => $paymentResult['payment_session_id'] ?? null,
-                    'order_id'                      => $orderId,
-                    'actual_price'                  => $paymentResult['actual_price'] ?? null,
-                    'discounted_price'              => $paymentResult['discounted_price'] ?? null,
-                    'description'                   => $paymentResult['description'] ?? null,
-                    'role'                          => $user->role,
-                    'message'                       => 'Registration fee payment is required to complete login.',
-                ];
-            }
-
-            if (!($paymentResult['success'] ?? false) && !empty($paymentResult['message'])) {
-                throw new \Exception($paymentResult['message'], 403);
-            }
-        }
-
-        // Login Successful
+        // Complete OTP-based login
         $deviceName = $data['device_name'] ?? $request->ip();
         $token = $user->createToken($deviceName)->plainTextToken;
 
@@ -385,37 +275,33 @@ class AuthService
         $this->checkUnusualLoginLocation($user);
         $this->checkNewDevice($user);
 
-        // Handle Remember Device
+        // Handle device trust
         $deviceToken = null;
         if (!empty($data['remember_device'])) {
-            $deviceToken = \Illuminate\Support\Str::random(64);
-            $cacheKey = 'trusted_device:' . $user->id . ':' . $deviceToken;
-            // Store for 30 days
-            \Illuminate\Support\Facades\Cache::put($cacheKey, true, now()->addDays(30));
+            $deviceToken = $this->createTrustedDeviceToken($user);
         }
 
         $this->userActivityService->loginSuccessful($user, [
-            'login_method' => 'api_otp_verification',
+            'login_method' => self::LOGIN_METHOD_OTP,
             'device_name' => $deviceName
         ]);
 
-        $responseData = [
+        $response = [
             'success' => true,
             'message' => 'Login successful',
-            'user' => $user->only(['id', 'name', 'email', 'role']),
-            'token' => $token,
-            'token_type' => 'Bearer',
         ];
 
-        if ($deviceToken) {
-            $responseData['device_token'] = $deviceToken;
-        }
+        $response = array_merge($response, $this->buildLoginResponse($user, $token, $deviceToken));
 
-        return $responseData;
+        return $response;
     }
 
     /**
-     * Logout user
+     * Logout user from current session
+     * 
+     * @param User $user Authenticated user to logout
+     * @return void
+     * @throws \Exception When logout process fails
      */
     public function logout(User $user): void
     {
@@ -428,13 +314,17 @@ class AuthService
             $user->currentAccessToken()->delete();
             $this->userActivityService->logout($user);
         } catch (\Exception $e) {
-            Log::error('AuthService Logout failed: ' . $e->getMessage());
+            $this->handleAuthError($e, 'Logout');
             throw $e;
         }
     }
 
     /**
-     * Logout from all devices
+     * Logout user from all devices and sessions
+     * 
+     * @param User $user Authenticated user to logout from all devices
+     * @return void
+     * @throws \Exception When logout process fails
      */
     public function logoutFromAllDevices(User $user): void
     {
@@ -442,13 +332,17 @@ class AuthService
             $this->sessionService->deactivateUserSessions($user);
             $user->tokens()->delete();
         } catch (\Exception $e) {
-            Log::error('AuthService LogoutAll failed: ' . $e->getMessage());
+            $this->handleAuthError($e, 'LogoutAll');
             throw $e;
         }
     }
 
     /**
-     * Refresh token
+     * Generate new authentication token for user
+     * 
+     * @param User $user Authenticated user requesting token refresh
+     * @return string New authentication token
+     * @throws \Exception When token refresh fails
      */
     public function refreshToken(User $user): string
     {
@@ -456,25 +350,27 @@ class AuthService
             $user->currentAccessToken()->delete();
             return $user->createToken('auth-token')->plainTextToken;
         } catch (\Exception $e) {
-            Log::error('AuthService RefreshToken failed: ' . $e->getMessage());
+            $this->handleAuthError($e, 'RefreshToken');
             throw $e;
         }
     }
 
     /**
-     * Forgot password
+     * Initiate password reset process
+     * 
+     * @param string $email User email address
+     * @return void
+     * @throws \Exception When account is deactivated
      */
     public function forgotPassword(string $email): void
     {
         $user = User::where('email', $email)->first();
 
         if (!$user) {
-            return; // Return silently
+            return; // Return silently for security
         }
 
-        if (!$user->is_active) {
-            throw new \Exception('Account is deactivated', 403);
-        }
+        $this->validateUserAccount($user);
 
         $user->sendPasswordResetNotification(
             Password::createToken($user)
@@ -486,19 +382,21 @@ class AuthService
     }
 
     /**
-     * Reset password
+     * Complete password reset with new password
+     * 
+     * @param array $data Password reset data (email, token, password)
+     * @return string Password reset status
+     * @throws \Exception When user not found or account deactivated
      */
     public function resetPassword(array $data): string
     {
         $user = User::where('email', $data['email'])->first();
 
         if (!$user) {
-             throw new \Exception('User not found', 404);
+            throw new \Exception(self::ERROR_USER_NOT_FOUND, 404);
         }
 
-        if (!$user->is_active) {
-            throw new \Exception('Account is deactivated', 403);
-        }
+        $this->validateUserAccount($user);
 
         $status = Password::reset($data, function ($user, $password) {
             $user->forceFill([
@@ -543,6 +441,272 @@ class AuthService
     private function checkNewDevice(User $user): void
     {
         // Implementation for device checking
+    }
+
+    /**
+     * Find user by identifier (email or phone)
+     */
+    private function findUserByIdentifier(string $identifier): ?User
+    {
+        $type = $this->inputDetectionService->detectType($identifier);
+        
+        if (!$type) {
+            return null;
+        }
+        
+        if ($type === 'email') {
+            return User::where('email', $identifier)->first();
+        }
+        
+        if ($type === 'phone') {
+            if (!$this->inputDetectionService->isValidPhone($identifier)) {
+                return null;
+            }
+            return User::where('phone', $identifier)->first();
+        }
+        
+        return null;
+    }
+
+    /**
+     * Check if user requires registration payment and return payment details if needed
+     */
+    private function checkRegistrationPayment(User $user): ?array
+    {
+        $registrationStatus = $user->registration_fee_status ?? null;
+        
+        if ($registrationStatus === self::FEE_STATUS_PAID || 
+            $registrationStatus === self::FEE_STATUS_NOT_REQUIRED || 
+            $user->role === self::ROLE_STUDENT) {
+            return null;
+        }
+        
+        $paymentResult = $this->registrationPaymentService->getOrCreateCheckoutUrl($user, 'api');
+        
+        if (!empty($paymentResult['checkout_url'])) {
+            $orderId = $paymentResult['order_id'] ?? '';
+            return [
+                'requires_registration_payment' => true,
+                'payment_link'                  => $this->buildProxyPaymentUrl($orderId),
+                'payment_session_id'            => $paymentResult['payment_session_id'] ?? null,
+                'order_id'                      => $orderId,
+                'actual_price'                  => $paymentResult['actual_price'] ?? null,
+                'discounted_price'              => $paymentResult['discounted_price'] ?? null,
+                'description'                   => $paymentResult['description'] ?? null,
+                'role'                          => $user->role,
+                'message'                       => 'Registration fee payment is required to complete login.',
+            ];
+        }
+        
+        if (!($paymentResult['success'] ?? false) && !empty($paymentResult['message'])) {
+            throw new \Exception($paymentResult['message'], 403);
+        }
+        
+        return null;
+    }
+
+    /**
+     * Build standard user response data
+     */
+    private function buildUserResponse(User $user): array
+    {
+        $response = $user->only(['id', 'name', 'email', 'role']);
+        
+        if ($user->phone) {
+            $response['phone_verified_at'] = $user->phone_verified_at ?? null;
+        }
+        
+        return $response;
+    }
+
+    /**
+     * Build successful login response
+     */
+    private function buildLoginResponse(User $user, string $token, ?string $deviceToken = null): array
+    {
+        $response = [
+            'user' => $this->buildUserResponse($user),
+            'email_verified_at' => $user->email_verified_at,
+            'registration_fee_status' => in_array($user->registration_fee_status, [self::FEE_STATUS_PAID, self::FEE_STATUS_NOT_REQUIRED]),
+            'token' => $token,
+            'token_type' => self::TOKEN_TYPE,
+        ];
+
+        if ($deviceToken) {
+            $response['device_token'] = $deviceToken;
+        }
+
+        return $response;
+    }
+
+    /**
+     * Build registration response
+     */
+    private function buildRegistrationResponse(User $user, string $token, bool $requiresPayment, ?array $registrationCharges): array
+    {
+        return [
+            'user' => $user->only(['id', 'name', 'email', 'role', 'email_verified_at', 'phone_verified_at', 'registration_fee_status']),
+            'token' => $token,
+            'token_type' => self::TOKEN_TYPE,
+            'next_step' => 'email_verification',
+            'requires_registration_payment' => $requiresPayment,
+            'registration_charges' => $registrationCharges,
+        ];
+    }
+
+    /**
+     * Build OTP required response
+     */
+    private function buildOtpRequiredResponse(string $identifier, string $type, string $message): array
+    {
+        return [
+            'requires_otp' => true,
+            'identifier' => $identifier,
+            'type' => $type,
+            'message' => $message,
+        ];
+    }
+
+    /**
+     * Handle and log authentication errors consistently
+     */
+    private function handleAuthError(\Exception $e, string $operation, array $context = []): void
+    {
+        Log::error("AuthService {$operation} failed: " . $e->getMessage(), array_merge([
+            'trace' => $e->getTraceAsString()
+        ], $context));
+    }
+
+    /**
+     * Validate user account status and throw appropriate exceptions
+     */
+    private function validateUserAccount(User $user): void
+    {
+        if (!$user->is_active) {
+            throw new \Exception(self::ERROR_ACCOUNT_DEACTIVATED, 403);
+        }
+    }
+
+    /**
+     * Validate user email verification for login
+     */
+    private function validateEmailVerification(User $user): void
+    {
+        if ($user->email_verified_at === null) {
+            throw new \Exception(self::ERROR_EMAIL_NOT_VERIFIED, 403);
+        }
+    }
+
+    /**
+     * Execute operation with graceful failure handling
+     */
+    private function executeGracefully(callable $operation, string $errorMessage): void
+    {
+        try {
+            $operation();
+        } catch (\Exception $e) {
+            Log::error($errorMessage . ': ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Check if the current device is trusted for the user
+     */
+    private function isTrustedDevice(User $user, Request $request): bool
+    {
+        $deviceToken = $request->header('X-Device-Token');
+        
+        if (!$deviceToken) {
+            return false;
+        }
+
+        $cacheKey = 'trusted_device:' . $user->id . ':' . $deviceToken;
+        return \Illuminate\Support\Facades\Cache::has($cacheKey);
+    }
+
+    /**
+     * Handle OTP requirement for untrusted devices
+     */
+    private function handleOtpRequirement(User $user, string $identifier, string $type): array
+    {
+        $otpType = $type;
+        if ($type === 'phone' && empty($user->phone)) {
+            $otpType = 'email';
+        }
+        
+        $this->otpService->sendOtp($user, $otpType);
+
+        return $this->buildOtpRequiredResponse(
+            $identifier, 
+            $otpType, 
+            "OTP sent to your {$otpType}. Please verify to complete login."
+        );
+    }
+
+    /**
+     * Complete login process for trusted devices
+     */
+    private function completeTrustedLogin(User $user, array $credentials, Request $request): array
+    {
+        $deviceName = $credentials['device_name'] ?? $request->ip();
+        $token = $user->createToken($deviceName)->plainTextToken;
+
+        $this->sessionService->createSession($user, $request);
+        $this->checkUnusualLoginLocation($user);
+        $this->checkNewDevice($user);
+
+        $this->userActivityService->loginSuccessful($user, [
+            'login_method' => self::LOGIN_METHOD_TRUSTED,
+            'device_name' => $deviceName
+        ]);
+
+        return $this->buildLoginResponse($user, $token);
+    }
+
+    /**
+     * Create trusted device token and cache it
+     */
+    private function createTrustedDeviceToken(User $user): string
+    {
+        $deviceToken = \Illuminate\Support\Str::random(self::TRUSTED_DEVICE_TOKEN_LENGTH);
+        $cacheKey = 'trusted_device:' . $user->id . ':' . $deviceToken;
+        \Illuminate\Support\Facades\Cache::put($cacheKey, true, now()->addDays(self::TRUSTED_DEVICE_CACHE_DAYS));
+        
+        return $deviceToken;
+    }
+
+    /**
+     * Validate identifier and get user with proper error handling
+     */
+    private function getUserByIdentifier(string $identifier): User
+    {
+        $type = $this->inputDetectionService->detectType($identifier);
+        
+        if (!$type) {
+            throw ValidationException::withMessages([
+                'identifier' => [self::ERROR_INVALID_IDENTIFIER_FORMAT],
+            ]);
+        }
+        
+        $user = null;
+        if ($type === 'email') {
+            $user = User::where('email', $identifier)->first();
+        } elseif ($type === 'phone') {
+            if (!$this->inputDetectionService->isValidPhone($identifier)) {
+                throw ValidationException::withMessages([
+                    'identifier' => [self::ERROR_INVALID_PHONE_FORMAT],
+                ]);
+            }
+            $user = User::where('phone', $identifier)->first();
+        }
+        
+        if (!$user) {
+            throw ValidationException::withMessages([
+                'identifier' => [self::ERROR_USER_NOT_FOUND],
+            ]);
+        }
+        
+        return $user;
     }
 
     /**
