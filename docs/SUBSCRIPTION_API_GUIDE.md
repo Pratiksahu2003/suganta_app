@@ -176,7 +176,8 @@ Get details of a specific subscription plan.
       "currency": "INR",
       "status": "pending"
     },
-    "checkout_url": "https://payments.cashfree.com/forms/...",
+    "checkout_url": "https://www.suganta.in/api/v1/payment/checkout?order_id=SUB_ABC123XYZ",
+    "payment_session_id": "session_abc123",
     "subscription_plan": {
       // Plan details
     }
@@ -225,7 +226,8 @@ Get details of a specific subscription plan.
       "currency": "INR",
       "status": "pending"
     },
-    "checkout_url": "https://payments.cashfree.com/forms/...",
+    "checkout_url": "https://www.suganta.in/api/v1/payment/checkout?order_id=SUB_DEF456GHI",
+    "payment_session_id": "session_def456",
     "subscription": {
       // Current subscription details
     }
@@ -333,9 +335,11 @@ const purchase = await fetch('/api/v1/subscriptions/purchase', {
   })
 }).then(r => r.json());
 
-// Redirect to payment page
+// Redirect to payment page (uses proxy checkout system)
 if (purchase.success) {
   window.location.href = purchase.data.checkout_url;
+  // This will redirect to: /api/v1/payment/checkout?order_id=SUB_XXXXX
+  // Which then loads the Cashfree payment page
 }
 
 // Check current subscription

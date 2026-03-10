@@ -75,19 +75,17 @@ class SubscriptionService
                 if (in_array($orderStatus, ['ACTIVE'], true)) {
                     // Order still active, return existing checkout URL
                     $existingPayment->update(['gateway_response' => $freshOrder]);
-                    $checkoutUrl = $this->cashfree->getCheckoutUrl($freshOrder);
+                    $checkoutUrl = $this->buildProxyCheckoutUrl($existingPayment->order_id);
 
-                    if ($checkoutUrl) {
-                        return [
-                            'success' => true,
-                            'checkout_url' => $checkoutUrl,
-                            'payment_session_id' => $freshOrder['payment_session_id'] ?? null,
-                            'order_id' => $existingPayment->order_id,
-                            'plan_name' => $plan->name,
-                            'amount' => $plan->price,
-                            'currency' => $plan->currency,
-                        ];
-                    }
+                    return [
+                        'success' => true,
+                        'checkout_url' => $checkoutUrl,
+                        'payment_session_id' => $freshOrder['payment_session_id'] ?? null,
+                        'order_id' => $existingPayment->order_id,
+                        'plan_name' => $plan->name,
+                        'amount' => $plan->price,
+                        'currency' => $plan->currency,
+                    ];
                 }
 
                 // Order expired or failed, mark as failed
@@ -134,7 +132,7 @@ class SubscriptionService
             );
 
             $orderResponse = $this->cashfree->createOrder($orderPayload);
-            $checkoutUrl = $this->cashfree->getCheckoutUrl($orderResponse);
+            $checkoutUrl = $this->buildProxyCheckoutUrl($orderId);
 
             $payment->update([
                 'reference_id' => $orderResponse['cf_order_id'] ?? $orderId,
@@ -415,5 +413,21 @@ class SubscriptionService
             ->active()
             ->with(['plan', 'payment'])
             ->first();
+    }
+
+    /**
+     * Build the proxy checkout URL for a given order ID.
+     * This uses the same proxy system as registration payments.
+     */
+    private function buildProxyCheckoutUrl(string $orderId): string
+    {
+        $parsed = parse_url(rtrim(config('app.url', 'http://localhost'), '/'));
+        $baseUrl = ($parsed['scheme'] ?? 'https') . '://' . ($parsed['host'] ?? 'localhost');
+
+        if (!empty($parsed['port'])) {
+            $baseUrl .= ':' . $parsed['port'];
+        }
+
+        return $baseUrl . '/api/v1/payment/checkout?order_id=' . $orderId;
     }
 }
