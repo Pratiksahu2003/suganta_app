@@ -18,18 +18,39 @@ class SubscriptionService
     ) {}
 
     /**
-     * Create a subscription payment for the given user and plan.
+     * Get or create a subscription payment checkout URL for the given user and plan.
      *
-     * @return array{payment: Payment, checkout_url: string, payment_session_id?: string}
+     * @return array{success: bool, checkout_url?: string, already_paid?: bool, message?: string, order_id?: string, payment_session_id?: string, plan_name?: string, amount?: float, currency?: string}
      */
-    public function createSubscriptionPayment(User $user, SubscriptionPlan $plan): array
+    public function getOrCreateSubscriptionCheckoutUrl(User $user, SubscriptionPlan $plan, string $source = 'web'): array
     {
+        // Check if user already has an active subscription for this type
+        $existingSubscription = UserSubscription::where('user_id', $user->id)
+            ->whereHas('plan', function ($q) use ($plan) {
+                $q->where('s_type', $plan->s_type);
+            })
+            ->active()
+            ->first();
+
+        if ($existingSubscription) {
+            return [
+                'success' => false,
+                'message' => 'You already have an active subscription for this plan type.',
+            ];
+        }
+
         if (!$user->hasVerifiedEmail()) {
-            throw new \Exception('Please verify your email address before purchasing a subscription.');
+            return [
+                'success' => false,
+                'message' => 'Please verify your email address before purchasing a subscription.',
+            ];
         }
 
         if (empty(config('cashfree.app_id')) || empty(config('cashfree.secret_key'))) {
-            throw new \Exception('Payment system is not configured. Please contact the administrator.');
+            return [
+                'success' => false,
+                'message' => 'Payment system is not configured. Please contact the administrator.',
+            ];
         }
 
         // Check for existing pending payment for this plan
@@ -48,7 +69,7 @@ class SubscriptionService
                 if ($this->cashfree->isOrderPaid($freshOrder)) {
                     // Payment was completed, process it
                     $this->processSuccessfulPayment($existingPayment, $freshOrder);
-                    throw new \Exception('Payment has already been completed for this subscription.');
+                    return ['success' => true, 'already_paid' => true];
                 }
 
                 if (in_array($orderStatus, ['ACTIVE'], true)) {
@@ -58,9 +79,13 @@ class SubscriptionService
 
                     if ($checkoutUrl) {
                         return [
-                            'payment' => $existingPayment,
+                            'success' => true,
                             'checkout_url' => $checkoutUrl,
                             'payment_session_id' => $freshOrder['payment_session_id'] ?? null,
+                            'order_id' => $existingPayment->order_id,
+                            'plan_name' => $plan->name,
+                            'amount' => $plan->price,
+                            'currency' => $plan->currency,
                         ];
                     }
                 }
@@ -94,6 +119,7 @@ class SubscriptionService
                 'plan_name' => $plan->name,
                 'billing_period' => $plan->billing_period,
                 's_type' => $plan->s_type,
+                'source' => $source,
             ],
         ]);
 
@@ -122,12 +148,17 @@ class SubscriptionService
                 'user_id' => $user->id,
                 'plan_id' => $plan->id,
                 'amount' => $amount,
+                'source' => $source,
             ]);
 
             return [
-                'payment' => $payment,
+                'success' => true,
                 'checkout_url' => $checkoutUrl,
                 'payment_session_id' => $orderResponse['payment_session_id'] ?? null,
+                'order_id' => $orderId,
+                'plan_name' => $plan->name,
+                'amount' => $amount,
+                'currency' => $plan->currency,
             ];
         } catch (\Exception $e) {
             Log::error('Subscription payment initiation failed', [
@@ -139,8 +170,39 @@ class SubscriptionService
             ]);
 
             $payment->update(['status' => 'failed']);
-            throw new \Exception('Failed to create payment order: ' . $e->getMessage());
+            
+            return [
+                'success' => false,
+                'message' => 'Failed to create payment order. Please try again.',
+            ];
         }
+    }
+
+    /**
+     * Create a subscription payment for the given user and plan.
+     * 
+     * @deprecated Use getOrCreateSubscriptionCheckoutUrl instead
+     * @return array{payment: Payment, checkout_url: string, payment_session_id?: string}
+     */
+    public function createSubscriptionPayment(User $user, SubscriptionPlan $plan): array
+    {
+        $result = $this->getOrCreateSubscriptionCheckoutUrl($user, $plan, 'api');
+        
+        if (!$result['success']) {
+            throw new \Exception($result['message'] ?? 'Failed to create subscription payment');
+        }
+        
+        if ($result['already_paid'] ?? false) {
+            throw new \Exception('Subscription payment already completed');
+        }
+        
+        $payment = Payment::where('order_id', $result['order_id'])->first();
+        
+        return [
+            'payment' => $payment,
+            'checkout_url' => $result['checkout_url'],
+            'payment_session_id' => $result['payment_session_id'] ?? null,
+        ];
     }
 
     /**
@@ -231,17 +293,32 @@ class SubscriptionService
             throw new \Exception('Subscription plan or user not found.');
         }
 
-        // Create renewal payment
-        $result = $this->createSubscriptionPayment($user, $plan);
+        // Create renewal payment using the new method
+        $result = $this->getOrCreateSubscriptionCheckoutUrl($user, $plan, 'api_renewal');
+        
+        if (!$result['success']) {
+            throw new \Exception($result['message'] ?? 'Failed to create renewal payment');
+        }
+        
+        if ($result['already_paid'] ?? false) {
+            throw new \Exception('Renewal payment already completed');
+        }
 
-        // Update the subscription meta to link with the new payment
-        $result['payment']->update([
-            'meta' => array_merge($result['payment']->meta, [
-                'renewal_for_subscription_id' => $subscription->id,
-            ])
-        ]);
+        // Update the payment meta to link with the renewal subscription
+        $payment = Payment::where('order_id', $result['order_id'])->first();
+        if ($payment) {
+            $payment->update([
+                'meta' => array_merge($payment->meta, [
+                    'renewal_for_subscription_id' => $subscription->id,
+                ])
+            ]);
+        }
 
-        return $result;
+        return [
+            'payment' => $payment,
+            'checkout_url' => $result['checkout_url'],
+            'payment_session_id' => $result['payment_session_id'] ?? null,
+        ];
     }
 
     /**
@@ -263,6 +340,7 @@ class SubscriptionService
 
     /**
      * Get fresh checkout data for an existing payment (used by PaymentController).
+     * Returns the same structure as RegistrationPaymentService for consistency.
      */
     public function getFreshCheckoutData(Payment $payment): ?array
     {
@@ -302,7 +380,7 @@ class SubscriptionService
             $payment->update(['status' => 'failed', 'gateway_response' => $freshOrder]);
             return null;
         } catch (\Exception $e) {
-            Log::error('Failed to get fresh checkout data', [
+            Log::error('Failed to get fresh checkout data for subscription payment', [
                 'payment_id' => $payment->id,
                 'order_id' => $payment->order_id,
                 'error' => $e->getMessage(),

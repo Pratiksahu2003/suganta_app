@@ -235,21 +235,31 @@ Get details of a specific subscription plan.
 
 ## Payment Flow
 
+The subscription payment flow now works exactly like the registration payment system for consistency and reliability.
+
 ### 1. User Purchases Subscription
 1. User calls `/api/v1/subscriptions/purchase` with `subscription_plan_id`
-2. API creates a payment record and Cashfree order
-3. API returns `checkout_url` for payment
-4. User is redirected to Cashfree payment page
+2. API checks for existing active subscriptions and validates user
+3. API creates or reuses existing payment record and Cashfree order
+4. API returns `checkout_url` for payment (same as registration payments)
+5. User is redirected to Cashfree payment page via `/api/v1/payment/checkout?order_id=SUB_XXXXX`
 
 ### 2. Payment Processing
-1. User completes payment on Cashfree
+1. User completes payment on Cashfree hosted page
 2. Cashfree sends webhook to `/api/v1/payment/webhook`
-3. API processes the webhook and creates/activates subscription
-4. User is redirected back to the application
+3. API processes the webhook and creates/activates subscription automatically
+4. User is redirected back to the application with payment status
 
 ### 3. Payment Verification
 - Users can check payment status via `/api/v1/payments/`
 - Subscription status can be checked via `/api/v1/subscriptions/current`
+- Payment checkout uses the same proxy system as registration payments
+
+### 4. Key Improvements
+- **Consistent Flow**: Now matches registration payment flow exactly
+- **Reuse Logic**: Reuses existing pending payments instead of creating duplicates
+- **Error Handling**: Same error structure and handling as registration payments
+- **Proxy Support**: Uses the same checkout proxy system for better reliability
 
 ## Error Responses
 

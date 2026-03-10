@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Requests\PurchaseSubscriptionRequest;
 use App\Http\Resources\SubscriptionPlanResource;
 use App\Http\Resources\UserSubscriptionResource;
+use App\Models\Payment;
 use App\Models\SubscriptionPlan;
 use App\Models\UserSubscription;
 use App\Services\SubscriptionService;
@@ -128,50 +129,43 @@ class SubscriptionController extends BaseApiController
      */
     public function purchase(PurchaseSubscriptionRequest $request): JsonResponse
     {
-        try {
-            $user = Auth::user();
-            $planId = $request->validated('subscription_plan_id');
-            
-            $plan = SubscriptionPlan::active()->find($planId);
-            
-            if (!$plan) {
-                return $this->notFound('Subscription plan not found or inactive.');
-            }
+        $user = Auth::user();
+        $planId = $request->validated('subscription_plan_id');
+        
+        $plan = SubscriptionPlan::active()->find($planId);
+        
+        if (!$plan) {
+            return $this->notFound('Subscription plan not found or inactive.');
+        }
 
-            // Check if user already has an active subscription for this type
-            $existingSubscription = UserSubscription::where('user_id', $user->id)
-                ->whereHas('plan', function ($q) use ($plan) {
-                    $q->where('s_type', $plan->s_type);
-                })
-                ->active()
-                ->first();
+        $result = $this->subscriptionService->getOrCreateSubscriptionCheckoutUrl($user, $plan, 'api');
 
-            if ($existingSubscription) {
-                return $this->error(
-                    'You already have an active subscription for this plan type.',
-                    Response::HTTP_CONFLICT
-                );
-            }
-
-            $result = $this->subscriptionService->createSubscriptionPayment($user, $plan);
-
-            return $this->success('Subscription payment created successfully.', [
-                'payment' => [
-                    'order_id' => $result['payment']->order_id,
-                    'amount' => $result['payment']->amount,
-                    'currency' => $result['payment']->currency,
-                    'status' => $result['payment']->status,
-                ],
-                'checkout_url' => $result['checkout_url'],
-                'subscription_plan' => new SubscriptionPlanResource($plan),
-            ]);
-
-        } catch (\Exception $e) {
+        if (!$result['success']) {
             return $this->error(
-                'Failed to create subscription payment: ' . $e->getMessage(),
-                Response::HTTP_INTERNAL_SERVER_ERROR
+                $result['message'] ?? 'Failed to create subscription payment.',
+                Response::HTTP_BAD_REQUEST
             );
         }
+
+        if ($result['already_paid'] ?? false) {
+            return $this->success('Subscription payment already completed.', [
+                'order_id' => $result['order_id'] ?? null,
+                'status' => 'already_paid',
+                'subscription_plan' => new SubscriptionPlanResource($plan),
+            ]);
+        }
+
+        return $this->success('Subscription payment created successfully.', [
+            'payment' => [
+                'order_id' => $result['order_id'],
+                'amount' => $result['amount'],
+                'currency' => $result['currency'],
+                'status' => 'pending',
+            ],
+            'checkout_url' => $result['checkout_url'],
+            'payment_session_id' => $result['payment_session_id'] ?? null,
+            'subscription_plan' => new SubscriptionPlanResource($plan),
+        ]);
     }
 
     /**
@@ -225,25 +219,48 @@ class SubscriptionController extends BaseApiController
             );
         }
 
-        try {
-            $result = $this->subscriptionService->renewSubscription($subscription);
+        $plan = $subscription->plan;
+        if (!$plan) {
+            return $this->error('Subscription plan not found.', Response::HTTP_NOT_FOUND);
+        }
 
-            return $this->success('Subscription renewal payment created successfully.', [
-                'payment' => [
-                    'order_id' => $result['payment']->order_id,
-                    'amount' => $result['payment']->amount,
-                    'currency' => $result['payment']->currency,
-                    'status' => $result['payment']->status,
-                ],
-                'checkout_url' => $result['checkout_url'],
-                'subscription' => new UserSubscriptionResource($subscription),
-            ]);
+        $result = $this->subscriptionService->getOrCreateSubscriptionCheckoutUrl($user, $plan, 'api_renewal');
 
-        } catch (\Exception $e) {
+        if (!$result['success']) {
             return $this->error(
-                'Failed to create renewal payment: ' . $e->getMessage(),
-                Response::HTTP_INTERNAL_SERVER_ERROR
+                $result['message'] ?? 'Failed to create renewal payment.',
+                Response::HTTP_BAD_REQUEST
             );
         }
+
+        if ($result['already_paid'] ?? false) {
+            return $this->success('Subscription renewal payment already completed.', [
+                'order_id' => $result['order_id'] ?? null,
+                'status' => 'already_paid',
+                'subscription' => new UserSubscriptionResource($subscription->fresh()),
+            ]);
+        }
+
+        // Update the payment meta to link with the renewal subscription
+        $payment = Payment::where('order_id', $result['order_id'])->first();
+        if ($payment) {
+            $payment->update([
+                'meta' => array_merge($payment->meta, [
+                    'renewal_for_subscription_id' => $subscription->id,
+                ])
+            ]);
+        }
+
+        return $this->success('Subscription renewal payment created successfully.', [
+            'payment' => [
+                'order_id' => $result['order_id'],
+                'amount' => $result['amount'],
+                'currency' => $result['currency'],
+                'status' => 'pending',
+            ],
+            'checkout_url' => $result['checkout_url'],
+            'payment_session_id' => $result['payment_session_id'] ?? null,
+            'subscription' => new UserSubscriptionResource($subscription),
+        ]);
     }
 }
