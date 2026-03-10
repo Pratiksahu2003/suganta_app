@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\V1\LeadController;
 use App\Http\Controllers\Api\V1\Profile\ProfileController;
 use App\Http\Controllers\Api\V1\RoleController;
 use App\Http\Controllers\Api\V1\StudyRequirementController;
+use App\Http\Controllers\Api\V1\SubscriptionController;
 
 /*
 |--------------------------------------------------------------------------
@@ -115,6 +116,22 @@ Route::prefix('v1')->group(function (): void {
         ->group(function () {
             Route::get('/', 'index');
         });
+
+    // Subscription Routes
+    Route::prefix('subscriptions')->controller(SubscriptionController::class)->group(function () {
+        // Public routes - subscription plans
+        Route::get('plans', 'plans');
+        Route::get('plans/{plan}', 'plan');
+        
+        // Protected routes - user subscriptions and purchases
+        Route::middleware('auth:sanctum')->group(function () {
+            Route::get('my-subscriptions', 'mySubscriptions');
+            Route::get('current', 'currentSubscription');
+            Route::post('purchase', 'purchase');
+            Route::patch('{subscription}/cancel', 'cancel');
+            Route::post('{subscription}/renew', 'renew');
+        });
+    });
 
     // Profile Routes (auth user's own profile only)
     Route::middleware('auth:sanctum')->prefix('profile')->controller(ProfileController::class)->group(function () {

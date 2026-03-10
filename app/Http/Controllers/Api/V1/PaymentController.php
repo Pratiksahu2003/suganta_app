@@ -6,6 +6,7 @@ use App\Models\Payment;
 use App\Models\User;
 use App\Services\CashfreeService;
 use App\Services\RegistrationPaymentService;
+use App\Services\SubscriptionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -17,7 +18,8 @@ class PaymentController extends BaseApiController
 {
     public function __construct(
         protected CashfreeService $cashfree,
-        protected RegistrationPaymentService $registrationPaymentService
+        protected RegistrationPaymentService $registrationPaymentService,
+        protected SubscriptionService $subscriptionService
     ) {}
 
     /**
@@ -142,7 +144,13 @@ class PaymentController extends BaseApiController
         }
 
         try {
-            $checkoutData = $this->registrationPaymentService->getFreshCheckoutData($payment);
+            $paymentType = $payment->meta['type'] ?? '';
+            
+            if ($paymentType === 'subscription') {
+                $checkoutData = $this->subscriptionService->getFreshCheckoutData($payment);
+            } else {
+                $checkoutData = $this->registrationPaymentService->getFreshCheckoutData($payment);
+            }
 
             if (!$checkoutData) {
                 return $this->error(
@@ -465,26 +473,26 @@ HTML;
 
         switch ($eventType) {
             case 'PAYMENT_SUCCESS_WEBHOOK':
-                $this->registrationPaymentService->handlePaymentSuccess($orderId, $paymentData);
+                $this->handlePaymentSuccess($orderId, $paymentData);
                 break;
 
             case 'PAYMENT_FAILED_WEBHOOK':
             case 'PAYMENT_USER_DROPPED_WEBHOOK':
-                $this->registrationPaymentService->handlePaymentFailure($orderId, $paymentData);
+                $this->handlePaymentFailure($orderId, $paymentData);
                 break;
 
             case 'PAYMENT_CHARGES_WEBHOOK':
                 // Charge-related events: treat as success when payment_status indicates success
                 $paymentStatus = strtoupper($paymentData['payment_status'] ?? $payload['data']['payment_status'] ?? '');
                 if ($paymentStatus === 'SUCCESS' || $paymentStatus === 'PAID') {
-                    $this->registrationPaymentService->handlePaymentSuccess($orderId, $paymentData);
+                    $this->handlePaymentSuccess($orderId, $paymentData);
                 } else {
-                    $this->registrationPaymentService->handlePaymentFailure($orderId, $paymentData);
+                    $this->handlePaymentFailure($orderId, $paymentData);
                 }
                 break;
 
             case 'REFUND_STATUS_WEBHOOK':
-                $this->registrationPaymentService->handleRefundStatus($orderId, $paymentData);
+                $this->handleRefundStatus($orderId, $paymentData);
                 break;
 
             default:
@@ -493,6 +501,152 @@ HTML;
         }
 
         return response()->json(['message' => 'Webhook processed.'], Response::HTTP_OK);
+    }
+
+    /**
+     * Handle payment success for any payment type (registration or subscription).
+     */
+    private function handlePaymentSuccess(string $orderId, array $paymentData = []): void
+    {
+        $payment = Payment::where('order_id', $orderId)->first();
+        
+        if (!$payment) {
+            Log::error('Payment success webhook: payment record not found', ['order_id' => $orderId]);
+            return;
+        }
+
+        $paymentType = $payment->meta['type'] ?? '';
+
+        switch ($paymentType) {
+            case 'registration':
+                $this->registrationPaymentService->handlePaymentSuccess($orderId, $paymentData);
+                break;
+                
+            case 'subscription':
+                try {
+                    $this->subscriptionService->processSuccessfulPayment($payment, $paymentData);
+                    Log::info('Subscription payment processed successfully', [
+                        'order_id' => $orderId,
+                        'payment_id' => $payment->id,
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('Failed to process subscription payment', [
+                        'order_id' => $orderId,
+                        'payment_id' => $payment->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+                break;
+                
+            default:
+                Log::warning('Payment success webhook: unknown payment type', [
+                    'order_id' => $orderId,
+                    'payment_type' => $paymentType,
+                ]);
+                break;
+        }
+    }
+
+    /**
+     * Handle payment failure for any payment type (registration or subscription).
+     */
+    private function handlePaymentFailure(string $orderId, array $paymentData = []): void
+    {
+        $payment = Payment::where('order_id', $orderId)->first();
+        
+        if (!$payment) {
+            Log::error('Payment failure webhook: payment record not found', ['order_id' => $orderId]);
+            return;
+        }
+
+        $paymentType = $payment->meta['type'] ?? '';
+
+        switch ($paymentType) {
+            case 'registration':
+                $this->registrationPaymentService->handlePaymentFailure($orderId, $paymentData);
+                break;
+                
+            case 'subscription':
+                $payment->update([
+                    'status' => 'failed',
+                    'processed_at' => now(),
+                    'gateway_response' => array_merge(
+                        $payment->gateway_response ?? [],
+                        ['payment_data' => $paymentData]
+                    ),
+                ]);
+                
+                Log::info('Subscription payment failed', [
+                    'order_id' => $orderId,
+                    'payment_id' => $payment->id,
+                ]);
+                break;
+                
+            default:
+                Log::warning('Payment failure webhook: unknown payment type', [
+                    'order_id' => $orderId,
+                    'payment_type' => $paymentType,
+                ]);
+                break;
+        }
+    }
+
+    /**
+     * Handle refund status for any payment type (registration or subscription).
+     */
+    private function handleRefundStatus(string $orderId, array $paymentData = []): void
+    {
+        $payment = Payment::where('order_id', $orderId)->first();
+        
+        if (!$payment) {
+            Log::error('Refund status webhook: payment record not found', ['order_id' => $orderId]);
+            return;
+        }
+
+        $paymentType = $payment->meta['type'] ?? '';
+
+        switch ($paymentType) {
+            case 'registration':
+                $this->registrationPaymentService->handleRefundStatus($orderId, $paymentData);
+                break;
+                
+            case 'subscription':
+                // Handle subscription refund
+                $refundStatus = strtoupper($paymentData['refund_status'] ?? $paymentData['status'] ?? '');
+                
+                if (in_array($refundStatus, ['SUCCESS', 'PROCESSED', 'COMPLETED'], true)) {
+                    $payment->update([
+                        'status' => 'refunded',
+                        'processed_at' => now(),
+                        'gateway_response' => array_merge(
+                            $payment->gateway_response ?? [],
+                            [
+                                'refund_data' => $paymentData,
+                                'refund_processed_at' => now()->toISOString()
+                            ]
+                        ),
+                    ]);
+
+                    // Cancel the associated subscription
+                    $subscription = UserSubscription::where('payment_id', $payment->id)->first();
+                    if ($subscription) {
+                        $subscription->update(['status' => 'refunded']);
+                        
+                        Log::info('Subscription refunded and cancelled', [
+                            'order_id' => $orderId,
+                            'subscription_id' => $subscription->id,
+                        ]);
+                    }
+                }
+                break;
+                
+            default:
+                Log::warning('Refund status webhook: unknown payment type', [
+                    'order_id' => $orderId,
+                    'payment_type' => $paymentType,
+                ]);
+                break;
+        }
     }
 
     /**

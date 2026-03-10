@@ -698,11 +698,44 @@ class User extends Authenticatable implements MustVerifyEmail, CanResetPassword
     }
 
     /**
+     * Get active subscription for a specific type
+     */
+    public function activeSubscriptionForType(int $sType)
+    {
+        return $this->hasOne(UserSubscription::class)
+            ->whereHas('plan', function($q) use ($sType) {
+                $q->where('s_type', $sType);
+            })
+            ->where('status', 'active')
+            ->where(function($q) {
+                $q->whereNull('expires_at')
+                  ->orWhere('expires_at', '>', now());
+            })
+            ->latest();
+    }
+
+    /**
      * Check if user has active subscription
      */
     public function hasActiveSubscription(): bool
     {
         return $this->activeSubscription()->exists();
+    }
+
+    /**
+     * Check if user has active subscription for a specific type
+     */
+    public function hasActiveSubscriptionForType(int $sType): bool
+    {
+        return $this->activeSubscriptionForType($sType)->exists();
+    }
+
+    /**
+     * Get all payments for this user
+     */
+    public function payments()
+    {
+        return $this->hasMany(Payment::class);
     }
 
     /**
