@@ -321,8 +321,9 @@ class SubscriptionService
 
     /**
      * Calculate expiration date based on billing period.
+     * Returns null for lifetime subscriptions.
      */
-    protected function calculateExpirationDate(Carbon $startDate, string $billingPeriod): Carbon
+    protected function calculateExpirationDate(Carbon $startDate, string $billingPeriod): ?Carbon
     {
         return match (strtolower($billingPeriod)) {
             'daily' => $startDate->copy()->addDay(),
