@@ -53,9 +53,14 @@ I have successfully created a complete subscription API system that allows users
 ## 🔧 Key Features
 
 ### **Multi-Type Subscriptions**
-- Support for different subscription types (`s_type` parameter)
+- Support for different subscription types (`s_type` parameter): `1` = Portfolio plans, `2` = Note download plans
 - Users can have different active subscriptions for different services
 - Prevents duplicate active subscriptions of the same type
+
+### **Access-Based Plan Visibility**
+- **Users without active subscription** (or unauthenticated): See only **free plans** (price = 0) for the requested s_type
+- **Users with active subscription**: See all plans for that s_type
+- **Free plan (s_type=1, price=0)** required in DB: Defines default portfolio upload limits for non-subscribers
 
 ### **Payment Gateway Integration**
 - Full Cashfree payment gateway integration

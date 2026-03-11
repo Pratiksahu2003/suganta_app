@@ -739,12 +739,13 @@ class User extends Authenticatable implements MustVerifyEmail, CanResetPassword
     }
 
     /**
-     * Get portfolio upload limits based on subscription
+     * Get portfolio upload limits based on subscription (s_type = 1 = Portfolio plans).
+     * If no active subscription: uses free plan (s_type=1, price=0) from subscription_plans.
      */
     public function getPortfolioLimits(): array
     {
-        $activeSubscription = $this->activeSubscription;
-        
+        $activeSubscription = $this->activeSubscriptionForType(1)->with('plan')->first();
+
         if ($activeSubscription && $activeSubscription->plan) {
             return [
                 'max_images' => $activeSubscription->plan->max_images,
@@ -752,10 +753,23 @@ class User extends Authenticatable implements MustVerifyEmail, CanResetPassword
             ];
         }
 
-        // Return free limits from settings
+        // Use free plan (s_type=1, price=0) from subscription_plans
+        $freePlan = SubscriptionPlan::active()
+            ->where('s_type', 1)
+            ->where('price', 0)
+            ->first();
+
+        if ($freePlan) {
+            return [
+                'max_images' => $freePlan->max_images,
+                'max_files' => $freePlan->max_files,
+            ];
+        }
+
+        // Fallback if no free plan exists in DB
         return [
-            'max_images' => PortfolioSetting::getValue('free_max_images', 2),
-            'max_files' => PortfolioSetting::getValue('free_max_files', 2),
+            'max_images' => 2,
+            'max_files' => 2,
         ];
     }
 

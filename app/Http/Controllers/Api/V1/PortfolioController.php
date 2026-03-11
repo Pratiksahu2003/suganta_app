@@ -124,6 +124,7 @@ class PortfolioController extends BaseApiController
 
     /**
      * Show auth user's portfolio (one per user). Returns null if not yet created.
+     * Includes plan_limits (max_images, max_files) from user's subscription or free plan.
      */
     public function show(): JsonResponse
     {
@@ -131,11 +132,12 @@ class PortfolioController extends BaseApiController
         $user = Auth::user();
 
         $portfolio = Portfolio::forUser($user->id)->with('user')->first();
+        $planLimits = $user->getPortfolioLimits();
 
-        return $this->success(
-            'Portfolio retrieved successfully.',
-            $portfolio ? new PortfolioResource($portfolio) : null
-        );
+        return $this->success('Portfolio retrieved successfully.', [
+            'portfolio' => $portfolio ? new PortfolioResource($portfolio) : null,
+            'plan_limits' => $planLimits,
+        ]);
     }
 
     /**

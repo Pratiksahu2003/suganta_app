@@ -12,7 +12,7 @@ Endpoints for managing the authenticated user's portfolio. **One portfolio per u
 | Method | Endpoint | Description | Access |
 |--------|----------|-------------|--------|
 | GET | `/portfolios/options` | Get dropdown options (statuses, categories, tags) | Authenticated user |
-| GET | `/portfolios` | Get auth user's portfolio (single object or null) | Authenticated user |
+| GET | `/portfolios` | Get portfolio + plan limits (max_images, max_files) | Authenticated user |
 | POST | `/portfolios` | Create portfolio (only if user has none) | Authenticated user |
 | PUT/PATCH | `/portfolios` | Update auth user's portfolio | Authenticated user |
 
@@ -75,38 +75,44 @@ None.
   "success": true,
   "code": 200,
   "data": {
-    "id": 1,
-    "user_id": 1,
-    "user": {
+    "portfolio": {
       "id": 1,
-      "name": "John Doe",
-      "email": "john@example.com"
+      "user_id": 1,
+      "user": {
+        "id": 1,
+        "name": "John Doe",
+        "email": "john@example.com"
+      },
+      "title": "E-commerce Website",
+      "description": "Full-stack e-commerce platform.",
+      "images": [
+        {
+          "path": "users/1/portfolio/image_xxx.jpg",
+          "url": "https://api.example.com/storage/users/1/portfolio/image_xxx.jpg"
+        }
+      ],
+      "files": [
+        {
+          "path": "users/1/portfolio/doc.pdf",
+          "url": "https://api.example.com/storage/users/1/portfolio/doc.pdf",
+          "name": "doc.pdf"
+        }
+      ],
+      "category": "Web Design, E-commerce",
+      "categories": ["Web Design", "E-commerce"],
+      "tags": "React, Laravel, Stripe",
+      "tags_array": ["React", "Laravel", "Stripe"],
+      "url": "https://example.com/project",
+      "status": "published",
+      "order": 1,
+      "is_featured": true,
+      "created_at": "2025-03-11T10:00:00.000000Z",
+      "updated_at": "2025-03-11T12:00:00.000000Z"
     },
-    "title": "E-commerce Website",
-    "description": "Full-stack e-commerce platform.",
-    "images": [
-      {
-        "path": "users/1/portfolio/image_xxx.jpg",
-        "url": "https://api.example.com/storage/users/1/portfolio/image_xxx.jpg"
-      }
-    ],
-    "files": [
-      {
-        "path": "users/1/portfolio/doc.pdf",
-        "url": "https://api.example.com/storage/users/1/portfolio/doc.pdf",
-        "name": "doc.pdf"
-      }
-    ],
-    "category": "Web Design, E-commerce",
-    "categories": ["Web Design", "E-commerce"],
-    "tags": "React, Laravel, Stripe",
-    "tags_array": ["React", "Laravel", "Stripe"],
-    "url": "https://example.com/project",
-    "status": "published",
-    "order": 1,
-    "is_featured": true,
-    "created_at": "2025-03-11T10:00:00.000000Z",
-    "updated_at": "2025-03-11T12:00:00.000000Z"
+    "plan_limits": {
+      "max_images": 10,
+      "max_files": 5
+    }
   }
 }
 ```
@@ -117,11 +123,18 @@ None.
 {
   "message": "Portfolio retrieved successfully.",
   "success": true,
-  "code": 200
+  "code": 200,
+  "data": {
+    "portfolio": null,
+    "plan_limits": {
+      "max_images": 2,
+      "max_files": 2
+    }
+  }
 }
 ```
 
-*Note: When no portfolio exists, `data` is omitted. Use POST /portfolios to create one.*
+*`plan_limits` shows max images and files allowed: from the user's active Portfolio subscription (s_type=1) if they have one, otherwise from the **free plan** (s_type=1, price=0) in `subscription_plans`. Use when creating/updating portfolio and enforcing upload limits.*
 
 ---
 
@@ -152,13 +165,15 @@ Creates a new portfolio for the authenticated user. **One portfolio per user onl
 
 ### File Upload Constraints
 
+**Count limits:** Enforce `plan_limits.max_images` and `plan_limits.max_files` from `GET /portfolios`. These come from the user's subscription or free plan (s_type=1, price=0).
+
 **Images:**
-- Max 10 images per request
+- Max per request: `plan_limits.max_images` (free plan or subscription)
 - Max 5MB per image
 - MIME types: `jpg`, `jpeg`, `png`, `gif`, `webp`
 
 **Files:**
-- Max 10 files per request
+- Max per request: `plan_limits.max_files` (free plan or subscription)
 - Max 10MB per file
 - MIME types: `pdf`, `doc`, `docx`, `xls`, `xlsx`, `ppt`, `pptx`, `txt`, `zip`, `rar`
 
@@ -295,6 +310,18 @@ Same as Create (images: max 10, 5MB each; files: max 10, 10MB each).
 ---
 
 ## Response Field Reference
+
+### Plan Limits Object (GET /portfolios)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| max_images | integer | Max images allowed for portfolio |
+| max_files | integer | Max files allowed for portfolio |
+
+**Source (in order):**
+1. User's **active subscription** with s_type=1 (Portfolio plans) → plan's max_images, max_files
+2. **Free plan** in `subscription_plans` where s_type=1 and price=0
+3. Fallback: 2 each (if no free plan exists in DB)
 
 ### Portfolio Object
 

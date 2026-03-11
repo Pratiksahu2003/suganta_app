@@ -68,7 +68,13 @@ class SubscriptionPlan extends Model
         return $query->where('is_popular', true);
     }
 
- 
+    /**
+     * Scope for free plan (price = 0).
+     */
+    public function scopeFree($query)
+    {
+        return $query->where('price', 0);
+    }
 
     public static function scopeSpecificPlan( $s_type =1)
     {

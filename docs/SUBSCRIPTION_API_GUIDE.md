@@ -8,10 +8,12 @@ This guide explains how to use the subscription API endpoints to show subscripti
 
 **GET** `/api/v1/subscriptions/plans`
 
-Get all active subscription plans.
+Get active subscription plans. **Access-based filtering:**
+- **User has active subscription** for the requested s_type → returns all plans for that type
+- **User has NO active subscription** (or not authenticated) → returns only **free plans** (price = 0) for that type
 
 **Query Parameters:**
-- `s_type` (optional): Filter by subscription type (default: 1)
+- `s_type` (optional): Filter by subscription type (default: 1). `1` = Portfolio plans, `2` = Note download plans.
 
 **Response:**
 ```json
@@ -48,7 +50,9 @@ Get all active subscription plans.
 
 **GET** `/api/v1/subscriptions/plans/{plan_id}`
 
-Get details of a specific subscription plan.
+Get details of a specific subscription plan. **Access restriction:**
+- **Free plans** (price = 0): Always accessible
+- **Paid plans** (price > 0): Returns 404 if user has NO active subscription for that plan's s_type
 
 **Response:**
 ```json
@@ -300,11 +304,10 @@ Tokens can be obtained through the authentication endpoints (`/api/v1/auth/login
 ## Subscription Types
 
 The `s_type` parameter allows for different types of subscriptions:
-- `1` - Default subscription type
-- `2` - Premium subscription type
-- etc.
+- **`1`** - Portfolio plans (controls portfolio upload limits: max_images, max_files)
+- **`2`** - Note download plans
 
-This allows the system to support multiple subscription categories (e.g., different services or features).
+**Free plan requirement (s_type = 1):** Users without an active Portfolio subscription can only see and use plans where `price = 0`. The free plan (s_type=1, price=0) defines default portfolio upload limits. Ensure a free plan exists in `subscription_plans` for users who haven't subscribed.
 
 ## Webhook Security
 
