@@ -80,22 +80,7 @@ class SupportTicket extends Model
     public static function generateTicketNumber()
     {
         $prefix = 'TKT';
-        $year = date('Y');
-        $month = date('m');
-        
-        // Get the last ticket number for this month
-        $lastTicket = self::where('ticket_number', 'like', "{$prefix}{$year}{$month}%")
-            ->orderBy('ticket_number', 'desc')
-            ->first();
-
-        if ($lastTicket) {
-            $lastNumber = (int) substr($lastTicket->ticket_number, -4);
-            $newNumber = $lastNumber + 1;
-        } else {
-            $newNumber = 1;
-        }
-
-        return $prefix . $year . $month . str_pad($newNumber, 4, '0', STR_PAD_LEFT);
+        return $prefix . date('YmdHis') . rand(100, 999);
     }
 
     /**
@@ -345,7 +330,7 @@ class SupportTicket extends Model
         if (!$this->hasAttachment()) {
             return null;
         }
-        
+
         $filePath = storage_path('app/public/' . $this->attachment_path);
         return file_exists($filePath) ? filesize($filePath) : null;
     }
@@ -356,14 +341,14 @@ class SupportTicket extends Model
     public function getFormattedAttachmentSize(): ?string
     {
         $size = $this->getAttachmentSize();
-        
+
         if (!$size) {
             return null;
         }
-        
+
         $units = ['B', 'KB', 'MB', 'GB'];
         $power = $size > 0 ? floor(log($size, 1024)) : 0;
-        
+
         return number_format($size / pow(1024, $power), 2) . ' ' . $units[$power];
     }
-} 
+}

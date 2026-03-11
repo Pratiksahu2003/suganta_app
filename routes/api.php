@@ -109,7 +109,7 @@ Route::prefix('v1')->group(function (): void {
             Route::get('options', 'options');
             Route::get('/', 'show');
             Route::post('/', 'store');
-            Route::match(['put', 'patch'], '/', 'update');
+            Route::post( '/update', 'update');
         });
 
     // Lead Routes (auth user's own leads and created leads only)

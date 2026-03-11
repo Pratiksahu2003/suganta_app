@@ -42,7 +42,9 @@ class ResetPasswordNotification extends Notification
     public function toMail(object $notifiable): MailMessage
     {
         $frontendUrl = rtrim(config('app.frontend_url', 'https://www.suganta.com'), '/');
-        $url = $frontendUrl . '/reset-password?token=' . $this->token . '&email=' . urlencode($notifiable->getEmailForPasswordReset());
+        $email = $notifiable->getEmailForPasswordReset() ?? $notifiable->email;
+
+        $url = "{$frontendUrl}/reset-password/{$this->token}?email=" . urlencode($email);
 
         return (new MailMessage)
             ->subject('Reset Your Password - ' . config('company.name', config('app.name')))

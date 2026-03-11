@@ -20,7 +20,7 @@ return [
         ],
         'teacher' => [
             'actual_price' => 1000.00,
-            'discounted_price' => 299.00,
+            'discounted_price' => 1.00,
             'currency' => 'INR',
             'description' => 'Teacher Registration Fee',
         ],
