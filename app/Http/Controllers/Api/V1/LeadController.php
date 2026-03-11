@@ -58,9 +58,17 @@ class LeadController extends BaseApiController
         $user = Auth::user();
 
         $query = Lead::query()
-            ->forAuthUser($user->id)
-            ->with(['user:id,name,email', 'leadOwner:id,name,email', 'assignedTo:id,name,email'])
-            ->orderByDesc('created_at');
+            ->where(function ($q) use ($user) {
+                $q->where('user_id', $user->id)
+                    ->orWhere('lead_owner_id', $user->id)
+                    ->orWhere('assigned_to', $user->id);
+            })
+            ->with([
+                'user:id,name,email',
+                'leadOwner:id,name,email',
+                'assignedTo:id,name,email'
+            ])
+            ->latest('created_at');
 
         if ($request->filled('status')) {
             $query->byStatus($request->string('status'));
@@ -107,10 +115,6 @@ class LeadController extends BaseApiController
         /** @var User $user */
         $user = Auth::user();
 
-        if (!$this->userCanAccessLead($lead, $user)) {
-            return $this->notFound('Lead not found or access denied.');
-        }
-
         $lead->load(['user:id,name,email', 'leadOwner:id,name,email', 'assignedTo:id,name,email']);
 
         return $this->success('Lead retrieved successfully.', $lead->toArray());
@@ -121,8 +125,8 @@ class LeadController extends BaseApiController
      */
     private function userCanAccessLead(Lead $lead, User $user): bool
     {
-        return $lead->user_id === $user->id
-            || $lead->lead_owner_id === $user->id
-            || $lead->assigned_to === $user->id;
+        return $lead->user_id == $user->id
+            || $lead->lead_owner_id == $user->id
+            || $lead->assigned_to == $user->id;
     }
 }
