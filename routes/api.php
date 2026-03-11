@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\V1\RoleController;
 use App\Http\Controllers\Api\V1\StudyRequirementController;
 use App\Http\Controllers\Api\V1\SubscriptionController;
 use App\Http\Controllers\Api\V1\DashboardController;
+use App\Http\Controllers\Api\V1\NotificationController;
 
 /*
 |--------------------------------------------------------------------------
@@ -63,6 +64,9 @@ Route::prefix('v1')->group(function (): void {
 
     // Dashboard (auth only)
     Route::middleware('auth:sanctum')->get('dashboard', [DashboardController::class, 'index']);
+
+    // Notifications (auth user's notifications with pagination)
+    Route::middleware('auth:sanctum')->get('notifications', [NotificationController::class, 'index']);
 
     // Admin Dashboard (admin only)
 

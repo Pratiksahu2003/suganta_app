@@ -42,7 +42,13 @@ class DashboardController extends BaseApiController
             ->where('user_id', $user->id)
             ->count();
 
-      
+        // Last 5 payments for auth user
+        $recentPayments = Payment::query()
+            ->where('user_id', $user->id)
+            ->orderByDesc('created_at')
+            ->limit(5)
+            ->get()
+            ->map(fn (Payment $p) => $this->formatPayment($p));
 
         // 10 latest notifications for auth user
         $notifications = Notification::query()
@@ -63,9 +69,28 @@ class DashboardController extends BaseApiController
                 'leads' => $leadsCount,
                 'study_requirements' => $studyRequirementsCount,
             ],
+            'recent_payments' => $recentPayments,
             'latest_notifications' => $notifications,
             'user' => $userInfo,
         ]);
+    }
+
+    /**
+     * Format payment for dashboard response.
+     */
+    protected function formatPayment(Payment $payment): array
+    {
+        return [
+            'id' => $payment->id,
+            'order_id' => $payment->order_id,
+            'currency' => $payment->currency,
+            'amount' => (float) $payment->amount,
+            'status' => $payment->status,
+            'type' => $payment->meta['type'] ?? null,
+            'description' => $payment->meta['description'] ?? null,
+            'created_at' => $payment->created_at->toIso8601String(),
+            'processed_at' => $payment->processed_at?->toIso8601String(),
+        ];
     }
 
     /**
