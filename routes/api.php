@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\V1\ContactController;
 use App\Http\Controllers\Api\V1\LeadController;
 use App\Http\Controllers\Api\V1\Profile\ProfileController;
 use App\Http\Controllers\Api\V1\RoleController;
+use App\Http\Controllers\Api\V1\SubjectController;
 use App\Http\Controllers\Api\V1\StudyRequirementController;
 use App\Http\Controllers\Api\V1\SubscriptionController;
 use App\Http\Controllers\Api\V1\DashboardController;
@@ -61,6 +62,7 @@ Route::prefix('v1')->group(function (): void {
     Route::get('options', [OptionController::class, 'index']);
     Route::get('registration/charges', [RegistrationController::class, 'charges']);
     Route::get('roles', [RoleController::class, 'index']);
+    Route::get('subjects', [SubjectController::class, 'index']);
 
     // Dashboard (auth only)
     Route::middleware('auth:sanctum')->get('dashboard', [DashboardController::class, 'index']);
