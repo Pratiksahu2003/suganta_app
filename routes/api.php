@@ -126,9 +126,9 @@ Route::prefix('v1')->group(function (): void {
         ->group(function () {
             Route::get('/', 'index');
             Route::post('/', 'store');
-            Route::get('my-connections', 'myConnections');  // must be before {id} to avoid slug match
-            Route::get('{studyRequirement}', 'show');
-            Route::post('{studyRequirement}/connect', 'connect');
+            Route::get('my-connections', 'myConnections');
+            Route::get('{studyRequirement}', 'show')->whereNumber('studyRequirement');
+            Route::post('{studyRequirement}/connect', 'connect')->whereNumber('studyRequirement');
         });
 
     // Subscription Routes
