@@ -14,11 +14,18 @@ class StudyRequirementController extends BaseApiController
 {
     /**
      * Get paginated list of study requirements.
+     * Each item includes `is_connected` (boolean): whether the auth user has connected to this requirement.
      */
     public function index(Request $request): JsonResponse
     {
+        /** @var User $user */
+        $user = Auth::user();
+
         $query = StudyRequirement::query()
             ->with(['user:id,name,email'])
+            ->withExists([
+                'connectedUsers as is_connected' => fn ($q) => $q->where('user_id', $user->id),
+            ])
             ->orderByDesc('created_at');
 
         if ($request->filled('status')) {
@@ -42,8 +49,13 @@ class StudyRequirementController extends BaseApiController
         $perPage = min((int) $request->get('per_page', 15), 50);
         $requirements = $query->paginate($perPage);
 
+        $data = collect($requirements->items())->map(fn ($r) => array_merge(
+            $r->toArray(),
+            ['is_connected' => (bool) ($r->is_connected ?? false)]
+        ))->all();
+
         return $this->success('Study requirements retrieved successfully.', [
-            'data' => $requirements->items(),
+            'data' => $data,
             'meta' => [
                 'current_page' => $requirements->currentPage(),
                 'last_page' => $requirements->lastPage(),
@@ -102,12 +114,73 @@ class StudyRequirementController extends BaseApiController
 
     /**
      * Show a single study requirement.
+     * Includes `is_connected` (boolean): whether the auth user has connected to this requirement.
      */
     public function show(StudyRequirement $studyRequirement): JsonResponse
     {
+        /** @var User $user */
+        $user = Auth::user();
+
         $studyRequirement->load(['user:id,name,email', 'connectedUsers.user:id,name,email']);
 
-        return $this->success('Study requirement retrieved successfully.', $studyRequirement->toArray());
+        $data = $studyRequirement->toArray();
+        $data['is_connected'] = RequirementConnected::where('requirement_id', $studyRequirement->id)
+            ->where('user_id', $user->id)
+            ->exists();
+
+        return $this->success('Study requirement retrieved successfully.', $data);
+    }
+
+    /**
+     * List requirements the authenticated user has connected to (paginated).
+     * Returns each requirement with connection metadata (status, message, connected_at).
+     */
+    public function myConnections(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = Auth::user();
+
+        $query = RequirementConnected::query()
+            ->where('user_id', $user->id)
+            ->with(['requirement.user:id,name,email'])
+            ->orderByDesc('connected_at');
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->string('status'));
+        }
+
+        $perPage = min((int) $request->get('per_page', 15), 50);
+        $connections = $query->paginate($perPage);
+
+        $data = collect($connections->items())->map(function ($conn) {
+            $req = $conn->requirement ? $conn->requirement->toArray() : null;
+            return [
+                'id' => $conn->id,
+                'requirement_id' => $conn->requirement_id,
+                'status' => $conn->status,
+                'message' => $conn->message,
+                'connected_at' => $conn->connected_at?->toIso8601String(),
+                'requirement' => $req,
+            ];
+        })->all();
+
+        return $this->success('Your connected requirements retrieved successfully.', [
+            'data' => $data,
+            'meta' => [
+                'current_page' => $connections->currentPage(),
+                'last_page' => $connections->lastPage(),
+                'per_page' => $connections->perPage(),
+                'total' => $connections->total(),
+                'from' => $connections->firstItem(),
+                'to' => $connections->lastItem(),
+            ],
+            'links' => [
+                'first' => $connections->url(1),
+                'last' => $connections->url($connections->lastPage()),
+                'prev' => $connections->previousPageUrl(),
+                'next' => $connections->nextPageUrl(),
+            ],
+        ]);
     }
 
     /**

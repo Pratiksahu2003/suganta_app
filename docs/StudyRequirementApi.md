@@ -17,9 +17,10 @@ Study requirements represent tutoring or learning requests posted by students or
 
 | Method | Endpoint | Description | Access |
 |--------|----------|-------------|--------|
-| GET | `/study-requirements` | List study requirements (paginated) | Authenticated user |
+| GET | `/study-requirements` | List study requirements (paginated, includes `is_connected`) | Authenticated user |
 | POST | `/study-requirements` | Create a new study requirement | Authenticated user |
-| GET | `/study-requirements/{studyRequirement}` | Get a single study requirement with connected users | Authenticated user |
+| GET | `/study-requirements/my-connections` | List requirements the auth user has connected to (paginated) | Authenticated user |
+| GET | `/study-requirements/{studyRequirement}` | Get a single study requirement (includes `is_connected`, `connected_users`) | Authenticated user |
 | POST | `/study-requirements/{studyRequirement}/connect` | Connect (express interest) on a requirement | Authenticated user |
 
 ---
@@ -32,7 +33,7 @@ Study requirements represent tutoring or learning requests posted by students or
 | **Content-Type** | — |
 | **Access** | Protected (auth:sanctum) |
 
-Paginated list of all study requirements. Ordered by `created_at` descending. Supports filtering by status, learning mode, and search.
+Paginated list of all study requirements. Ordered by `created_at` descending. Supports filtering by status, learning mode, and search. Each item includes `is_connected` (boolean): whether the authenticated user has connected to this requirement.
 
 ### Query Parameters
 
@@ -89,6 +90,7 @@ GET /api/v1/study-requirements?status=in_review&per_page=10&page=2
         "meta": null,
         "created_at": "2025-03-12T10:00:00.000000Z",
         "updated_at": "2025-03-12T10:00:00.000000Z",
+        "is_connected": false,
         "user": {
           "id": 5,
           "name": "Rahul Sharma",
@@ -229,7 +231,7 @@ Creates a new study requirement. The authenticated user's ID is stored as `user_
 | **Content-Type** | — |
 | **Access** | Protected (auth:sanctum) |
 
-Returns a single study requirement with creator (`user`) and connected users (`connected_users`). Useful for viewing full details and who has expressed interest.
+Returns a single study requirement with creator (`user`) and connected users (`connected_users`). Includes `is_connected` (boolean): whether the auth user has connected to this requirement. Useful for viewing full details and who has expressed interest.
 
 ### Path Parameters
 
@@ -266,6 +268,7 @@ Returns a single study requirement with creator (`user`) and connected users (`c
       "name": "Rahul Sharma",
       "email": "rahul@example.com"
     },
+    "is_connected": false,
     "connected_users": [
       {
         "id": 1,
@@ -297,7 +300,84 @@ Returns a single study requirement with creator (`user`) and connected users (`c
 
 ---
 
-## 4. Connect to Requirement
+## 4. My Connected Requirements
+
+| | |
+|---|---|
+| **Endpoint** | `GET /api/v1/study-requirements/my-connections` |
+| **Content-Type** | — |
+| **Access** | Protected (auth:sanctum) |
+
+Paginated list of requirements the authenticated user has connected to. Each item includes the connection metadata (status, message, connected_at) and the full requirement. Ordered by `connected_at` descending.
+
+### Query Parameters
+
+| Parameter | Type | Required | Default | Validation | Description |
+|-----------|------|----------|---------|------------|-------------|
+| status | string | No | — | pending, accepted, rejected | Filter by connection status |
+| per_page | integer | No | 15 | max: 50 | Items per page |
+| page | integer | No | 1 | — | Page number |
+
+### Example Request
+
+```
+GET /api/v1/study-requirements/my-connections
+GET /api/v1/study-requirements/my-connections?status=pending&per_page=20
+```
+
+### Success (200)
+
+```json
+{
+  "message": "Your connected requirements retrieved successfully.",
+  "success": true,
+  "code": 200,
+  "data": {
+    "data": [
+      {
+        "id": 1,
+        "requirement_id": 5,
+        "status": "pending",
+        "message": "I have experience in Mathematics.",
+        "connected_at": "2025-03-12T11:00:00.000000Z",
+        "requirement": {
+          "id": 5,
+          "reference_id": "REQ-202503120000005",
+          "user_id": 3,
+          "contact_name": "Priya Singh",
+          "student_name": "Aarav Singh",
+          "subjects": ["Mathematics"],
+          "learning_mode": "online",
+          "status": "new",
+          "user": {
+            "id": 3,
+            "name": "Priya Singh",
+            "email": "priya@example.com"
+          }
+        }
+      }
+    ],
+    "meta": {
+      "current_page": 1,
+      "last_page": 2,
+      "per_page": 15,
+      "total": 18,
+      "from": 1,
+      "to": 15
+    },
+    "links": {
+      "first": "http://localhost/api/v1/study-requirements/my-connections?page=1",
+      "last": "http://localhost/api/v1/study-requirements/my-connections?page=2",
+      "prev": null,
+      "next": "http://localhost/api/v1/study-requirements/my-connections?page=2"
+    }
+  }
+}
+```
+
+---
+
+## 5. Connect to Requirement
 
 | | |
 |---|---|
@@ -511,6 +591,14 @@ curl -X POST "https://api.example.com/api/v1/study-requirements" \
 
 ```bash
 curl -X GET "https://api.example.com/api/v1/study-requirements/1" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Accept: application/json"
+```
+
+### My Connected Requirements (cURL)
+
+```bash
+curl -X GET "https://api.example.com/api/v1/study-requirements/my-connections" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Accept: application/json"
 ```

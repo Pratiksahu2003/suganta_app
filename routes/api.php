@@ -119,13 +119,14 @@ Route::prefix('v1')->group(function (): void {
         Route::get('{lead}', 'show');
     });
 
-    // Study Requirement Routes (paginated listing, create, show, connect)
+    // Study Requirement Routes (list, create, show, connect, my connections)
     Route::middleware('auth:sanctum')
         ->prefix('study-requirements')
         ->controller(StudyRequirementController::class)
         ->group(function () {
             Route::get('/', 'index');
             Route::post('/', 'store');
+            Route::get('my-connections', 'myConnections');  // must be before {id} to avoid slug match
             Route::get('{studyRequirement}', 'show');
             Route::post('{studyRequirement}/connect', 'connect');
         });
