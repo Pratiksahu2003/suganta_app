@@ -13,6 +13,7 @@
 | **Portfolio** | [Portfolio API](./PortfolioApi.md) | User portfolios |
 | **Registration** | [Registration API](./RegistrationApi.md) | Registration flows |
 | **Options** | [Options API](./OptionApi.md) | Dropdown options |
+| **Study Requirements** | [Study Requirement API](./StudyRequirementApi.md) | Create, list, view study requirements; connect teachers to requirements |
 
 ---
 

@@ -30,6 +30,7 @@ Welcome to the SuGanta API documentation! This folder contains comprehensive doc
 - [Registration API](./RegistrationApi.md) - User registration endpoints
 - [Options API](./OptionApi.md) - Dropdown options and configuration
 - [Portfolio API](./PortfolioApi.md) - Portfolio management (create, update, files, images)
+- [Study Requirement API](./StudyRequirementApi.md) - Create, list, view study requirements; connect to requirements
 
 ### Integrations
 - [SMS Integration](./SMS_INTEGRATION.md) - SMS service integration guide
@@ -160,7 +161,7 @@ if (notification.resource_type === 'support_ticket') {
 
 | Topic | Documentation |
 |-------|---------------|
-| **API Endpoints** | [Dashboard API](./DashboardApi.md), [Notification API](./NotificationApi.md), [Payment API](./PaymentApi.md), [Portfolio API](./PortfolioApi.md), [Profile API](./ProfileApi.md), [Support Ticket API](./SUPPORT_TICKET_API.md), [Registration API](./RegistrationApi.md), [Options API](./OptionApi.md) |
+| **API Endpoints** | [Dashboard API](./DashboardApi.md), [Notification API](./NotificationApi.md), [Payment API](./PaymentApi.md), [Portfolio API](./PortfolioApi.md), [Profile API](./ProfileApi.md), [Support Ticket API](./SUPPORT_TICKET_API.md), [Registration API](./RegistrationApi.md), [Options API](./OptionApi.md), [Study Requirement API](./StudyRequirementApi.md) |
 | **File Uploads** | [Support Ticket API](./SUPPORT_TICKET_API.md#file-upload-specifications), [Setup Storage](./SETUP_STORAGE.md) |
 | **Notifications** | [Notification API](./NotificationApi.md), [Notification Architecture](./NOTIFICATION_ARCHITECTURE.md) |
 | **Payments** | [Payment API](./PaymentApi.md) |
@@ -205,6 +206,7 @@ if (notification.resource_type === 'support_ticket') {
 | File Uploads | ✅ Production Ready | [Setup Guide](./SETUP_STORAGE.md) |
 | Notifications | ✅ Production Ready | [Architecture](./NOTIFICATION_ARCHITECTURE.md) |
 | Registration | ✅ Production Ready | [API Docs](./RegistrationApi.md) |
+| Study Requirements | ✅ Production Ready | [Study Requirement API](./StudyRequirementApi.md) |
 | SMS Integration | ✅ Production Ready | [Integration Guide](./SMS_INTEGRATION.md) |
 
 ---
