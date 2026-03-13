@@ -43,7 +43,7 @@ class ProfileController extends BaseApiController
             $profile->load(['instituteInfo', 'studentInfo', 'teachingInfo', 'professionalInfo', 'socialLinks']);
             $profile->updateCompletionPercentage();
 
-            $profileData = ProfileResponseFormatter::format($profile, [$this, 'getFileUrl']);
+            $profileData = ProfileResponseFormatter::format($profile, fn ($path) => $this->getFileUrl($path));
 
             $data = [
                 'user' => [
@@ -759,9 +759,23 @@ class ProfileController extends BaseApiController
             Cache::forget("profile_completion_data_{$profile->id}");
 
             $profile->updateCompletionPercentage();
-            $profileData = ProfileResponseFormatter::format($profile->fresh(), [$this, 'getFileUrl']);
 
-            return $this->success('Profile data refreshed successfully.', $profileData);
+            $profileData = ProfileResponseFormatter::format($profile->fresh(), fn ($path) => $this->getFileUrl($path));
+
+            $data = [
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'role' => $user->role,
+                    'email_verified_at' => $user->email_verified_at,
+                ],
+                'profile' => $profileData['profile'],
+                'profile_image_url' => $profileData['profile_image_url'],
+                'completion_percentage' => $profileData['completion_percentage'],
+            ];
+
+            return $this->success('Profile data refreshed successfully.', $data);
         } catch (\Exception $e) {
             Log::error('Profile refresh error: ' . $e->getMessage());
             return $this->serverError('Unable to refresh profile data.');
