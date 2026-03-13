@@ -151,7 +151,7 @@ class DashboardController extends BaseApiController
             'last_name' => $profile?->last_name ?? $this->parseLastName($user->name),
             'email' => $user->email,
             'phone' => $user->phone ?? $profile?->phone_primary ?? null,
-            'profile_pic' => $profile?->profile_image,
+            'profile_pic' => storage_file_url($profile?->profile_image , 'gcs'),
         ];
     }
 
