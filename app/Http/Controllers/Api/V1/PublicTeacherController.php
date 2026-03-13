@@ -81,11 +81,12 @@ class PublicTeacherController extends BaseApiController
      */
     public function show(int $id): JsonResponse
     {
-        $user = User::with(['profile', 'profile.teachingInfo', 'profile.socialLinks'])
+        $user = User::with(['profile', 'profile.teachingInfo', 'profile.socialLinks', 'portfolio'])
             ->where('role', 'teacher')
             ->whereNotNull('email_verified_at')
             ->where('id', '!=', self::EXCLUDED_USER_ID)
             ->whereIn('registration_fee_status', ['paid', 'not_required'])
+            ->where('is_active', true)
             ->where('id', $id)
             ->first();
 
@@ -373,7 +374,7 @@ class PublicTeacherController extends BaseApiController
             'name' => $user->name ?? $profile?->display_name ?? 'Teacher',
             'bio' => Str::limit($bio, 120),
             'avatar_url' => $this->avatarUrl($profile, $user),
-            'qualification' => $profile?->highest_qualification ?? $teachingInfo?->qualification ?? null,
+            'qualification' => $options['highest_qualification'],
             'experience_years' => $options['experience_years'],
             'rating' => (float) ($teachingInfo?->rating ?? 0),
             'total_reviews' => (int) ($teachingInfo?->total_reviews ?? 0),
@@ -409,50 +410,134 @@ class PublicTeacherController extends BaseApiController
             'created_at' => $r->created_at?->toIso8601String(),
         ])->all();
 
+        // Full profile structure per ProfileApi.md (Get Profile, Update Basic, Location, Social, Teaching)
+        $profileData = [
+            'id' => $profile->id,
+            'user_id' => $profile->user_id,
+            'first_name' => $profile->first_name,
+            'last_name' => $profile->last_name,
+            'display_name' => $profile->display_name,
+            'bio' => $profile->bio ?? $teachingInfo?->bio,
+            'date_of_birth' => $profile->date_of_birth?->format('Y-m-d'),
+            'gender' => $options['gender'],
+            'nationality' => $profile->nationality,
+            'phone_primary' => $profile->phone_primary,
+            'phone_secondary' => $profile->phone_secondary,
+            'whatsapp' => $profile->whatsapp,
+            'website' => $profile->website,
+            'emergency_contact_name' => $profile->emergency_contact_name,
+            'emergency_contact_phone' => $profile->emergency_contact_phone,
+            'highest_qualification' => $options['highest_qualification'],
+            'profile_image_url' => $this->avatarUrl($profile, $user),
+            'profile_completion_percentage' => $profile->profile_completion_percentage,
+        ];
+
+        $location = $this->formatLocation($profile);
+
+        $socialData = [
+            'facebook_url' => $profile->facebook_url,
+            'twitter_url' => $profile->twitter_url,
+            'instagram_url' => $profile->instagram_url,
+            'linkedin_url' => $profile->linkedin_url,
+            'youtube_url' => $profile->youtube_url,
+            'tiktok_url' => $profile->tiktok_url,
+            'telegram_username' => $profile->telegram_username,
+            'discord_username' => $profile->discord_username,
+            'github_url' => $profile->github_url,
+            'portfolio_url' => $profile->portfolio_url,
+            'blog_url' => $profile->blog_url,
+        ];
+
+        $teachingData = [
+            'qualification' => $options['highest_qualification'],
+            'qualification_text' => $teachingInfo?->qualification ?? $profile->highest_qualification,
+            'institution_name' => $profile->institution_name,
+            'field_of_study' => $profile->field_of_study,
+            'graduation_year' => $profile->graduation_year,
+            'teaching_experience_years' => $options['experience_years'],
+            'specialization' => $teachingInfo?->specialization,
+            'languages' => $teachingInfo?->languages ?? [],
+            'hourly_rate' => $teachingInfo?->hourly_rate ? (float) $teachingInfo->hourly_rate : null,
+            'hourly_rate_range' => $options['hourly_rate_range'],
+            'monthly_rate' => $teachingInfo?->monthly_rate ? (float) $teachingInfo->monthly_rate : null,
+            'monthly_rate_range' => $options['monthly_rate_range'],
+            'teaching_mode' => $options['teaching_mode'],
+            'availability_status' => $options['availability_status'],
+            'travel_radius_km' => $options['travel_radius_km'],
+            'teaching_philosophy' => $profile->teaching_philosophy ?? $teachingInfo?->teaching_philosophy,
+            'subjects_taught' => $teachingInfo?->subjects_taught ?? $profile->subjects_taught ?? [],
+            'online_classes' => (bool) ($teachingInfo?->online_classes ?? $profile->online_classes ?? false),
+            'home_tuition' => (bool) ($teachingInfo?->home_tuition ?? $profile->home_tuition ?? false),
+            'institute_classes' => (bool) ($teachingInfo?->institute_classes ?? $profile->institute_classes ?? false),
+        ];
+
         return [
             'id' => $user->id,
             'user' => [
                 'id' => $user->id,
                 'name' => $user->name ?? $profile->display_name ?? 'Teacher',
                 'email' => $user->email,
+                'role' => $user->role,
+                'email_verified_at' => $user->email_verified_at?->toIso8601String(),
             ],
-            'profile' => [
-                'bio' => $profile->bio ?? $teachingInfo?->bio,
-                'profile_image_url' => $this->avatarUrl($profile, $user),
-                'phone_primary' => $profile->phone_primary,
-                'whatsapp' => $profile->whatsapp,
-                'city' => $profile->city,
-                'state' => $profile->state,
-                'pincode' => $profile->pincode,
-                'gender' => $options['gender'],
-                'highest_qualification' => $options['highest_qualification'],
-            ],
-            'location' => $this->formatLocation($profile),
-            'teaching' => [
-                'qualification' => $teachingInfo?->qualification ?? $profile->highest_qualification,
-                'experience_years' => $options['experience_years'],
-                'specialization' => $teachingInfo?->specialization,
-                'languages' => $teachingInfo?->languages ?? [],
-                'hourly_rate' => $teachingInfo?->hourly_rate ? (float) $teachingInfo->hourly_rate : null,
-                'hourly_rate_range' => $options['hourly_rate_range'],
-                'monthly_rate' => $teachingInfo?->monthly_rate ? (float) $teachingInfo->monthly_rate : null,
-                'monthly_rate_range' => $options['monthly_rate_range'],
-                'teaching_mode' => $options['teaching_mode'],
-                'availability_status' => $options['availability_status'],
-                'travel_radius_km' => $options['travel_radius_km'],
-                'online_classes' => (bool) ($teachingInfo?->online_classes ?? $profile->online_classes ?? false),
-                'home_tuition' => (bool) ($teachingInfo?->home_tuition ?? $profile->home_tuition ?? false),
-                'institute_classes' => (bool) ($teachingInfo?->institute_classes ?? $profile->institute_classes ?? false),
-            ],
+            'profile' => $profileData,
+            'profile_image_url' => $this->avatarUrl($profile, $user),
+            'completion_percentage' => $profile->profile_completion_percentage,
+            'location' => $location,
+            'social' => $socialData,
+            'teaching' => $teachingData,
             'rating' => (float) ($teachingInfo?->rating ?? 0),
             'total_reviews' => (int) ($teachingInfo?->total_reviews ?? 0),
             'total_students' => (int) ($teachingInfo?->total_students ?? $profile->total_students ?? 0),
             'subjects' => $subjects,
+            'portfolio' => $this->formatPortfolio($user->portfolio),
             'institute' => null,
             'verified' => (bool) ($teachingInfo?->verified ?? false),
             'is_featured' => false,
             'reviews_sample' => $reviewsFormatted,
         ];
+    }
+
+    /**
+     * Format portfolio for public display. Returns null if no portfolio or status is not published.
+     */
+    private function formatPortfolio($portfolio): ?array
+    {
+        if (!$portfolio || $portfolio->status !== 'published') {
+            return null;
+        }
+
+        return [
+            'id' => $portfolio->id,
+            'title' => $portfolio->title,
+            'description' => $portfolio->description,
+            'images' => $this->formatPortfolioImages($portfolio->images ?? []),
+            'files' => $this->formatPortfolioFiles($portfolio->files ?? []),
+            'category' => $portfolio->category,
+            'categories_array' => $portfolio->categories_array ?? [],
+            'tags' => $portfolio->tags,
+            'tags_array' => $portfolio->tags_array ?? [],
+            'url' => $portfolio->url,
+            'is_featured' => (bool) $portfolio->is_featured,
+            'order' => (int) ($portfolio->order ?? 0),
+        ];
+    }
+
+    private function formatPortfolioImages(array $images): array
+    {
+        return array_map(fn (string $path) => [
+            'path' => $path,
+            'url' => storage_file_url($path),
+        ], $images);
+    }
+
+    private function formatPortfolioFiles(array $files): array
+    {
+        return array_map(fn (string $path) => [
+            'path' => $path,
+            'url' => storage_file_url($path),
+            'name' => basename($path),
+        ], $files);
     }
 
     /**
@@ -476,6 +561,7 @@ class PublicTeacherController extends BaseApiController
             ];
         }
 
+        $countryId = $profile->country_id ? (int) $profile->country_id : null;
         return [
             'address_line_1' => $profile->address_line_1,
             'address_line_2' => $profile->address_line_2,
@@ -483,7 +569,8 @@ class PublicTeacherController extends BaseApiController
             'city' => $profile->city,
             'state' => $profile->state,
             'pincode' => $profile->pincode,
-            'country_id' => $profile->country_id ? (int) $profile->country_id : null,
+            'country_id' => $countryId,
+            'country' => $countryId ? ProfileOptionsHelper::getOptionStructure('country', $countryId) : null,
             'latitude' => $profile->latitude ? (float) $profile->latitude : null,
             'longitude' => $profile->longitude ? (float) $profile->longitude : null,
         ];
