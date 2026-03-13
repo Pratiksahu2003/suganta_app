@@ -76,12 +76,18 @@ return [
 
         'gcs' => [
             'driver' => 'gcs',
-            'project_id' => env('GCP_PROJECT_ID'),
-            'key_file' => env('GCP_KEY_FILE'),
-            'bucket' => env('GCP_BUCKET'),
-            'path_prefix' => env('GCP_PATH_PREFIX', ''),
-            'storage_api_uri' => env('GCP_STORAGE_API_URI', null),
+            'key_file_path' => env('GCP_KEY_FILE') ?? env('GOOGLE_CLOUD_KEY_FILE'),
+            'key_file' => [],
+            'project_id' => env('GCP_PROJECT_ID', env('GOOGLE_CLOUD_PROJECT_ID')),
+            'bucket' => env('GCP_BUCKET', env('GOOGLE_CLOUD_STORAGE_BUCKET')),
+            'path_prefix' => env('GCP_PATH_PREFIX', env('GOOGLE_CLOUD_STORAGE_PATH_PREFIX', '')),
+            'storage_api_uri' => env('GCP_STORAGE_API_URI', env('GOOGLE_CLOUD_STORAGE_API_URI')),
+            'api_endpoint' => env('GCP_API_ENDPOINT', env('GOOGLE_CLOUD_STORAGE_API_ENDPOINT')),
             'visibility' => 'public',
+            'visibility_handler' => filter_var(env('GCP_UNIFORM_BUCKET_ACCESS'), FILTER_VALIDATE_BOOLEAN)
+                ? \League\Flysystem\GoogleCloudStorage\UniformBucketLevelAccessVisibility::class
+                : null,
+            'metadata' => ['cacheControl' => 'public,max-age=86400'],
             'throw' => false,
             'report' => false,
         ],

@@ -50,12 +50,9 @@ GCP_BUCKET=your-bucket-name
 
 ### Google Cloud Storage
 
-1. **Install package**:
-   ```bash
-   composer require league/flysystem-google-cloud-storage
-   ```
+1. **Package already installed**: `spatie/laravel-google-cloud-storage` (includes `league/flysystem-google-cloud-storage`)
 
-2. **Create service account** in GCP Console and download JSON key
+2. **Follow [GCP Storage Setup](GCP_Storage_Setup.md)** for bucket creation and service account setup
 
 3. **Configure .env**:
    ```env

@@ -105,6 +105,7 @@ API routes use the default `api` throttle (e.g. 60 requests per minute). Configu
 - [Storage Structure](docs/StorageStructure.md)
 - [HandlesFileStorage Trait](docs/HandlesFileStorageTrait.md)
 - [Storage Switch Guide](docs/StorageSwitchGuide.md)
+- [GCP Cloud Storage Setup](docs/GCP_Storage_Setup.md)
 
 ## License
 

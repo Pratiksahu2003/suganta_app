@@ -17,6 +17,8 @@ use App\Http\Controllers\Api\V1\StudyRequirementController;
 use App\Http\Controllers\Api\V1\SubscriptionController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\NotificationController;
+use App\Http\Controllers\Api\V1\PublicTeacherController;
+use App\Http\Controllers\Api\V1\PublicInstituteController;
 
 /*
 |--------------------------------------------------------------------------
@@ -63,6 +65,18 @@ Route::prefix('v1')->group(function (): void {
     Route::get('registration/charges', [RegistrationController::class, 'charges']);
     Route::get('roles', [RoleController::class, 'index']);
     Route::get('subjects', [SubjectController::class, 'index']);
+
+    // Public Teacher List & Profile (no auth)
+    Route::prefix('teachers')->controller(PublicTeacherController::class)->group(function () {
+        Route::get('/', 'index');
+        Route::get('{idOrSlug}', 'show');
+    });
+
+    // Public Institute List & Profile (no auth)
+    Route::prefix('institutes')->controller(PublicInstituteController::class)->group(function () {
+        Route::get('/', 'index');
+        Route::get('{idOrSlug}', 'show');
+    });
 
     // Dashboard (auth only)
     Route::middleware('auth:sanctum')->get('dashboard', [DashboardController::class, 'index']);
