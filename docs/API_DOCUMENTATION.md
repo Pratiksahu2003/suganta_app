@@ -9,6 +9,7 @@
 |--------|---------------|-------------|
 | **Profile** | [Profile API](./ProfileApi.md) | User profile, location, social, teaching, institute, student, avatar, password, preferences |
 | **Profile Teaching** | [Profile Teaching API](./ProfileTeachingApi.md) | Update teaching info (qualification, experience, rates, subjects) |
+| **Dashboard** | [Dashboard API](./DashboardApi.md) | User dashboard: counts, recent payments, recent leads, notifications |
 | **Auth** | (below) | Register, login, logout, password reset, verification |
 | **Support Tickets** | [Support Ticket API](./SUPPORT_TICKET_API.md) | Create, manage support tickets |
 | **Portfolio** | [Portfolio API](./PortfolioApi.md) | User portfolios |

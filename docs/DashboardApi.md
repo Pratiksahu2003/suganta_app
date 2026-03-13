@@ -11,7 +11,7 @@ Dashboard summary endpoints for authenticated users. The User Dashboard returns 
 
 | Method | Endpoint | Description | Access |
 |--------|----------|-------------|--------|
-| GET | `/dashboard` | User dashboard (counts, recent payments, notifications, user info) | Any authenticated user |
+| GET | `/dashboard` | User dashboard (counts, recent payments, recent leads, notifications, user info) | Any authenticated user |
 
 ---
 
@@ -22,7 +22,7 @@ Dashboard summary endpoints for authenticated users. The User Dashboard returns 
 | **Endpoint** | `GET /api/v1/dashboard` |
 | **Access** | Protected (auth:sanctum) |
 
-Returns counts of the authenticated user's support tickets, payments, leads, study requirements, and posts, plus last 5 payment records, 10 latest notifications, and user profile info.
+Returns counts of the authenticated user's support tickets, payments, leads, study requirements, and posts, plus last 5 payment records, **latest 5 leads**, 10 latest notifications, and user profile info.
 
 ### Counts (User-Scoped)
 
@@ -60,6 +60,20 @@ Returns counts of the authenticated user's support tickets, payments, leads, stu
         "description": "Registration fee",
         "created_at": "2025-03-11T10:30:00.000000Z",
         "processed_at": "2025-03-11T10:31:00.000000Z"
+      }
+    ],
+    "recent_leads": [
+      {
+        "id": 1,
+        "lead_id": "SUG-20250313-123456",
+        "name": "Jane Smith",
+        "email": "jane@example.com",
+        "phone": "+919876543210",
+        "type": "student",
+        "status": "new",
+        "priority": "medium",
+        "subject_interest": "Mathematics",
+        "created_at": "2025-03-13T09:15:00.000000Z"
       }
     ],
     "latest_notifications": [
@@ -182,6 +196,21 @@ Returns system-wide counts for support tickets, payments, leads, study requireme
 | phone | string \| null | User or profile primary phone |
 | profile_pic | string | Avatar URL (or default placeholder) |
 
+### Lead Object (Recent Leads)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | integer | Lead ID |
+| lead_id | string | Unique lead identifier (e.g. `SUG-20250313-123456`) |
+| name | string | Lead contact name |
+| email | string \| null | Lead email |
+| phone | string | Lead phone number |
+| type | string \| null | `student`, `parent`, `institute`, `teacher` |
+| status | string | e.g. `new`, `contacted`, `qualified`, `lost` |
+| priority | string \| null | `low`, `medium`, `high`, `urgent` |
+| subject_interest | string \| null | Subject of interest |
+| created_at | string | ISO 8601 datetime |
+
 ### Payment Object (Recent Payments)
 
 | Field | Type | Description |
@@ -241,6 +270,7 @@ const response = await fetch('/api/v1/dashboard', {
 const { data } = await response.json();
 console.log('Counts:', data.counts);
 console.log('Recent payments:', data.recent_payments);
+console.log('Recent leads:', data.recent_leads);
 console.log('User:', data.user);
 ```
 
@@ -252,6 +282,7 @@ console.log('User:', data.user);
 |---------|---------------|-----------------|
 | **Counts** | User's own data | System-wide totals |
 | **Recent payments** | Last 5 payment records | — |
+| **Recent leads** | Last 5 leads (owned, assigned, or created) | — |
 | **Notifications** | User's 10 latest | 10 latest from all users |
 | **User info** | Current user only | Recipient user per notification |
 | **Access** | Any authenticated user | Admin / Super-admin |

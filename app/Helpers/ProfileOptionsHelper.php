@@ -58,6 +58,13 @@ class ProfileOptionsHelper
         }
 
         $label = self::getLabel($optionKey, $id);
+        if ($label === null && is_string($id)) {
+            $resolvedId = self::getValue($optionKey, $id);
+            if ($resolvedId !== null) {
+                $id = $resolvedId;
+                $label = self::getLabel($optionKey, $id);
+            }
+        }
         if ($label === null) {
             return null;
         }

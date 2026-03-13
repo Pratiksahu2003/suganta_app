@@ -68,6 +68,7 @@ Route::prefix('v1')->group(function (): void {
 
     // Public Teacher List & Profile (no auth)
     Route::prefix('teachers')->controller(PublicTeacherController::class)->group(function () {
+        Route::get('options', 'options');
         Route::get('/', 'index');
         Route::get('{idOrSlug}', 'show');
     });
