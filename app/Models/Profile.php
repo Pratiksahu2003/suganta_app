@@ -513,20 +513,19 @@ class Profile extends Model
     }
 
     /**
-     * Get profile image URL
+     * Get profile image URL.
+     * Uses configured upload disk (GCS returns direct storage.googleapis.com URL).
      */
     public function getProfileImageUrlAttribute()
     {
         if ($this->profile_image && !empty(trim($this->profile_image))) {
-            // Check if the file actually exists in storage
-            if (Storage::disk('public')->exists($this->profile_image)) {
-                // Add timestamp to prevent browser caching
+            $disk = config('filesystems.upload_disk', 'public');
+            if (Storage::disk($disk)->exists($this->profile_image)) {
                 $timestamp = time();
-                return asset('storage/' . $this->profile_image) . '?v=' . $timestamp;
+                return storage_file_url($this->profile_image) . '?v=' . $timestamp;
             }
         }
-        
-        // Return default image based on user role
+
         return $this->getDefaultProfileImageUrl();
     }
 
@@ -571,16 +570,18 @@ class Profile extends Model
      */
     public function hasCustomImage()
     {
-        return !empty($this->profile_image) && Storage::disk('public')->exists($this->profile_image);
+        $disk = config('filesystems.upload_disk', 'public');
+        return !empty($this->profile_image) && Storage::disk($disk)->exists($this->profile_image);
     }
 
     /**
-     * Get cover image URL
+     * Get cover image URL.
+     * Uses configured upload disk (GCS returns direct storage.googleapis.com URL).
      */
     public function getCoverImageUrlAttribute()
     {
         if ($this->cover_image) {
-            return asset('storage/' . $this->cover_image);
+            return storage_file_url($this->cover_image);
         }
         return asset('images/default-cover.jpg');
     }

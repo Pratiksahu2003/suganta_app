@@ -7,6 +7,7 @@ use Illuminate\Contracts\Auth\CanResetPassword;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable implements MustVerifyEmail, CanResetPassword
@@ -382,13 +383,13 @@ class User extends Authenticatable implements MustVerifyEmail, CanResetPassword
     }
 
     /**
-     * Get user's avatar URL
+     * Get user's avatar URL.
+     * Uses configured upload disk (GCS returns direct storage.googleapis.com URL).
      */
     public function getAvatarUrlAttribute(): string
     {
         if ($this->profile_image && !empty($this->profile_image)) {
-            // Use direct storage path as requested
-            return asset('storage/' . $this->profile_image);
+            return storage_file_url($this->profile_image);
         }
 
         return 'data:image/svg+xml;base64,' . base64_encode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%239CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>');
@@ -403,14 +404,14 @@ class User extends Authenticatable implements MustVerifyEmail, CanResetPassword
     }
 
     /**
-     * Get the user's profile image URL
+     * Get the user's profile image URL.
+     * Uses configured upload disk (GCS returns direct storage.googleapis.com URL).
      */
     public function getProfileImageUrlAttribute()
     {
         if ($this->profile && $this->profile->profile_image) {
-            // Add timestamp to prevent browser caching
             $timestamp = time();
-            return asset('storage/' . $this->profile->profile_image) . '?v=' . $timestamp;
+            return storage_file_url($this->profile->profile_image) . '?v=' . $timestamp;
         }
         return asset('images/default-avatar.png');
     }

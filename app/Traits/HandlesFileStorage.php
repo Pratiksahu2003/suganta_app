@@ -174,25 +174,17 @@ trait HandlesFileStorage
     /**
      * Get the full URL for a file.
      *
-     * For GCS and other cloud disks, returns the project-domain URL so files are
-     * served through the app (e.g. https://yoursite.com/storage/profile-images/xxx.jpg).
-     * For local 'public' disk, returns the standard public URL.
+     * For GCS: returns signed URL (works with private buckets).
+     * For S3: returns direct/temporary URL.
+     * For local 'public' disk: returns app domain URL.
      *
      * @param string $path The file path
      * @param string|null $disk The storage disk (default: from config)
-     * @return string The full URL (project domain for cloud disks)
+     * @return string The full URL
      */
     protected function getFileUrl(string $path, ?string $disk = null): string
     {
-        $diskName = $disk ?? $this->getUploadDisk();
-
-        // Cloud disks (gcs, s3): serve through app domain for consistent URLs
-        if (in_array($diskName, ['gcs', 's3'])) {
-            $base = rtrim(config('app.url'), '/');
-            return $base . '/storage/' . ltrim($path, '/');
-        }
-
-        return Storage::disk($diskName)->url($path);
+        return storage_file_url($path, $disk ?? $this->getUploadDisk());
     }
 
     /**
