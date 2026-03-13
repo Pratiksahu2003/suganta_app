@@ -88,7 +88,7 @@ kets, signed URLs are used. This sets    | When using GCS with non-public buc
 
         'gcs' => [
             'driver' => 'gcs',
-            'key_file_path' => env('GCP_KEY_FILE') ?? env('GOOGLE_CLOUD_KEY_FILE'),
+            'key_file_path' => storage_path('keys/sugnata-tutors-2846153fe5ca.json'),
             'key_file' => [],
             'project_id' => env('GCP_PROJECT_ID', env('GOOGLE_CLOUD_PROJECT_ID')),
             'bucket' => env('GCP_BUCKET', env('GOOGLE_CLOUD_STORAGE_BUCKET')),
