@@ -11,6 +11,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\Response;
 use Exception;
@@ -379,13 +380,15 @@ class SupportTicketController extends BaseApiController
                 return $this->notFound('No attachment found for this ticket.');
             }
 
-            $filePath = storage_path('app/public/' . $supportTicket->attachment_path);
-
-            if (!file_exists($filePath)) {
+            $disk = config('filesystems.upload_disk', 'public');
+            if (!Storage::disk($disk)->exists($supportTicket->attachment_path)) {
                 return $this->notFound('Attachment file not found.');
             }
 
-            return response()->download($filePath);
+            return Storage::disk($disk)->download(
+                $supportTicket->attachment_path,
+                $supportTicket->getAttachmentFilename() ?? 'attachment'
+            );
         } catch (Exception $e) {
             Log::error('Failed to download support ticket attachment', [
                 'ticket_id' => $supportTicket->id ?? null,
@@ -418,13 +421,15 @@ class SupportTicketController extends BaseApiController
                 return $this->notFound('No attachment found for this reply.');
             }
 
-            $filePath = storage_path('app/public/' . $reply->attachment_path);
-
-            if (!file_exists($filePath)) {
+            $disk = config('filesystems.upload_disk', 'public');
+            if (!Storage::disk($disk)->exists($reply->attachment_path)) {
                 return $this->notFound('Attachment file not found.');
             }
 
-            return response()->download($filePath);
+            return Storage::disk($disk)->download(
+                $reply->attachment_path,
+                $reply->getAttachmentFilename() ?? 'attachment'
+            );
         } catch (Exception $e) {
             Log::error('Failed to download reply attachment', [
                 'ticket_id' => $supportTicket->id ?? null,

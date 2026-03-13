@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\Storage;
 use Carbon\Carbon;
 use App\Traits\HasActivityNotifications;
 
@@ -33,6 +34,8 @@ class SupportTicket extends Model
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
+
+    protected $appends = ['attachment'];
 
     // Priority levels
     const PRIORITY_LOW = 'low';
@@ -312,27 +315,43 @@ class SupportTicket extends Model
     }
 
     /**
-     * Get attachment URL
+     * Get attachment URL (uses storage_file_url for signed GCS URLs).
      */
     public function getAttachmentUrl(): ?string
     {
         if (!$this->hasAttachment()) {
             return null;
         }
-        return asset('storage/' . $this->attachment_path);
+        return storage_file_url($this->attachment_path);
     }
 
     /**
-     * Get attachment size
+     * Get attachment object for API (path, url, name) - appended to JSON.
+     */
+    public function getAttachmentAttribute(): ?array
+    {
+        if (!$this->hasAttachment()) {
+            return null;
+        }
+        return [
+            'path' => $this->attachment_path,
+            'url' => storage_file_url($this->attachment_path),
+            'name' => $this->getAttachmentFilename(),
+        ];
+    }
+
+    /**
+     * Get attachment size (uses configured upload disk for GCS).
      */
     public function getAttachmentSize(): ?int
     {
         if (!$this->hasAttachment()) {
             return null;
         }
-
-        $filePath = storage_path('app/public/' . $this->attachment_path);
-        return file_exists($filePath) ? filesize($filePath) : null;
+        $disk = config('filesystems.upload_disk', 'public');
+        return \Illuminate\Support\Facades\Storage::disk($disk)->exists($this->attachment_path)
+            ? \Illuminate\Support\Facades\Storage::disk($disk)->size($this->attachment_path)
+            : null;
     }
 
     /**

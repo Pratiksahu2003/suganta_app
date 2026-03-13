@@ -25,6 +25,8 @@ class SupportTicketReply extends Model
         'updated_at' => 'datetime',
     ];
 
+    protected $appends = ['attachment'];
+
     /**
      * Relationships
      */
@@ -66,14 +68,29 @@ class SupportTicketReply extends Model
     }
 
     /**
-     * Get attachment URL
+     * Get attachment URL (uses storage_file_url for signed GCS URLs).
      */
     public function getAttachmentUrl()
     {
         if (!$this->hasAttachment()) {
             return null;
         }
-        return asset('storage/' . $this->attachment_path);
+        return storage_file_url($this->attachment_path);
+    }
+
+    /**
+     * Get attachment object for API (path, url, name) - appended to JSON.
+     */
+    public function getAttachmentAttribute(): ?array
+    {
+        if (!$this->hasAttachment()) {
+            return null;
+        }
+        return [
+            'path' => $this->attachment_path,
+            'url' => storage_file_url($this->attachment_path),
+            'name' => $this->getAttachmentFilename(),
+        ];
     }
 
     /**
