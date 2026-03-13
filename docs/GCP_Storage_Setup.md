@@ -100,6 +100,9 @@ GCP_BUCKET=your-bucket-name
 # Set true if your bucket uses Uniform bucket-level access
 # Required when you see: "Cannot insert legacy ACL for an object when uniform bucket-level access is enabled"
 GCP_UNIFORM_BUCKET_ACCESS=true
+
+# Signed URL expiry in minutes (default 10080 = 7 days). Used for private buckets.
+# GCP_SIGNED_URL_EXPIRY_MINUTES=10080
 ```
 
 ### Alternative: Use GOOGLE_APPLICATION_CREDENTIALS
@@ -172,10 +175,10 @@ Set in `.env`:
 GCP_UNIFORM_BUCKET_ACCESS=true
 ```
 
-### 403 Forbidden on file URLs
+### 403 Forbidden or 404 Not Found on file URLs
 
-- Verify bucket has public read access (if using public URLs)
-- Or use signed URLs via `Storage::disk('gcs')->temporaryUrl($path, now()->addMinutes(30))`
+- **Signed URLs (default)**: The app uses signed URLs for GCS, so files work even when the bucket is private. Ensure `GCP_BUCKET` matches your actual bucket name exactly (check the URL – e.g. `suganta-uploads` vs `sugantatutors`).
+- **Public bucket option**: To use public URLs instead, add `allUsers` with role **Storage Object Viewer** in the bucket’s Permissions (IAM).
 
 ### Key file not found
 

@@ -31,6 +31,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | GCS Signed URL Expiry (minutes)
+    |--------------------------------------------------------------------------
+    |
+kets, signed URLs are used. This sets    | When using GCS with non-public buc
+    | how long each signed URL remains valid. Default: 10080 (7 days).
+    |
+    */
+
+    'gcs_signed_url_expiry_minutes' => env('GCP_SIGNED_URL_EXPIRY_MINUTES', 10080),
+
+    /*
+    |--------------------------------------------------------------------------
     | Filesystem Disks
     |--------------------------------------------------------------------------
     |

@@ -1,6 +1,18 @@
 <?php
 
+use App\Http\Controllers\StorageController;
 use Illuminate\Support\Facades\Route;
+
+/*
+|--------------------------------------------------------------------------
+| File Storage Proxy - Serve GCS/S3 files through app domain
+|--------------------------------------------------------------------------
+| When using cloud storage (GCS, S3), files are fetched and streamed here
+| so URLs stay on your domain: https://yoursite.com/storage/profile-images/xxx.jpg
+*/
+Route::get('/storage/{path}', [StorageController::class, 'serve'])
+    ->where('path', '.*')
+    ->name('storage.serve');
 
 /*
 |--------------------------------------------------------------------------
