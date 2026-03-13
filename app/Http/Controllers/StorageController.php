@@ -24,17 +24,24 @@ class StorageController extends Controller
             $storage = Storage::disk($disk);
             $mimeType = $storage->mimeType($path) ?? $this->guessMimeType($path);
 
+            $headers = [
+                'Content-Type'        => $mimeType,
+                'Cache-Control'       => 'public, max-age=86400',
+                'Content-Disposition' => 'inline; filename="' . basename($path) . '"',
+            ];
+
+            $size = $storage->size($path);
+            if (false !== $size) {
+                $headers['Content-Length'] = (string) $size;
+            }
+
             return new StreamedResponse(function () use ($storage, $path): void {
                 $stream = $storage->readStream($path);
                 if ($stream) {
                     fpassthru($stream);
                     fclose($stream);
                 }
-            }, 200, [
-                'Content-Type'        => $mimeType,
-                'Cache-Control'       => 'public, max-age=86400',
-                'Content-Disposition' => 'inline; filename="' . basename($path) . '"',
-            ]);
+            }, 200, $headers);
         } catch (\Throwable $e) {
             Log::error('Storage serve error', [
                 'path'  => $path,

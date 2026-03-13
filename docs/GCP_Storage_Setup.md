@@ -185,6 +185,24 @@ GCP_UNIFORM_BUCKET_ACCESS=true
 - Use absolute path: `GCP_KEY_FILE=/var/www/storage/keys/gcp-service-account.json`
 - Or path relative to project root: `GCP_KEY_FILE=storage/keys/gcp-service-account.json`
 
+### 404 on https://yoursite.com/storage/profile-images/xxx.jpg (GCS files)
+
+Files are served through the app (StorageController), not directly from disk. Ensure:
+
+1. **Route exists**: `GET /storage/{path}` in `routes/web.php` – this proxies to GCS
+2. **Requests reach Laravel**: If `public/storage` symlink exists, the web server may serve from it first. For GCS, files are in the cloud – the symlink has nothing. Ensure your server passes `/storage/*` to `index.php` when the file does not exist locally.
+
+   **Nginx** (recommended when using GCS):
+   ```nginx
+   location /storage {
+       try_files $uri /index.php?$query_string;
+   }
+   ```
+   This avoids matching `$uri/` (directory) so Laravel always handles `/storage/*` requests.
+
+3. **Config cache**: Run `php artisan config:clear` after changing `.env`
+4. **Service account roles**: The key must have **Storage Object Viewer** (or **Storage Object Admin**) on the bucket
+
 ## Security Checklist
 
 - [ ] Service account JSON key is in `storage/keys/` (gitignored)
