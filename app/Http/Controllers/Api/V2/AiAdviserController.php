@@ -11,14 +11,29 @@ use App\Traits\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 
 class AiAdviserController extends Controller
 {
     use ApiResponse;
 
+    /**
+     * Maximum number of previous messages to include in the AI context history
+     * when generating a reply. Kept intentionally small to reduce token usage.
+     */
+    protected int $historyLimit;
+
+    /**
+     * Maximum characters per history message sent to the AI model.
+     * Older/long messages are trimmed to keep prompts lightweight.
+     */
+    protected int $historyMessageMaxChars;
+
     public function __construct(
         protected GeminiAiService $gemini,
     ) {
+        $this->historyLimit = (int) config('gemini.history_limit', 10);
+        $this->historyMessageMaxChars = (int) config('gemini.history_message_max_chars', 800);
     }
 
     protected function getUserTokenLimit($user): int
@@ -66,7 +81,7 @@ class AiAdviserController extends Controller
             'subject' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $user = Auth::user();
+        $user = $request->user();
 
         $aiConversation = AiConversation::create([
             'user_id' => $user->id,
@@ -129,27 +144,33 @@ class AiAdviserController extends Controller
         $validated = $request->validate([
             'message' => ['required', 'string'],
         ]);
+        $user = $request->user();
 
-        $user = Auth::user();
-
-        if ($aiConversation->user_id !== $user->id) {
+        // Ensure the conversation strictly belongs to the authenticated user
+        // and is for the AI adviser purpose.
+        if ($aiConversation->user_id !== $user->id || $aiConversation->purpose !== 'ai_adviser') {
             return $this->forbidden('You are not part of this conversation.');
         }
 
+        // Build a trimmed history with only the most recent messages to reduce
+        // the number of tokens sent to the AI model.
         $history = $aiConversation->messages()
-            ->orderBy('created_at')
+            ->latest()
+            ->take($this->historyLimit)
             ->get()
+            ->sortBy('created_at')
             ->map(function (AiMessage $message) use ($user) {
                 $role = $message->user_id === $user->id ? 'user' : 'assistant';
 
                 return [
                     'role' => $role,
-                    'content' => $message->content,
+                    'content' => Str::limit($message->content, $this->historyMessageMaxChars),
                 ];
             })
+            ->values()
             ->all();
 
-        $userMessage = AiMessage::create([
+        AiMessage::create([
             'ai_conversation_id' => $aiConversation->id,
             'user_id' => $user->id,
             'content' => $validated['message'],
@@ -198,7 +219,7 @@ class AiAdviserController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $user = Auth::user();
+        $user = $request->user();
 
         $conversations = AiConversation::where('user_id', $user->id)
             ->where('purpose', 'ai_adviser')
@@ -210,22 +231,27 @@ class AiAdviserController extends Controller
 
     public function show(Request $request, AiConversation $aiConversation): JsonResponse
     {
-        $user = Auth::user();
+        $user = $request->user();
 
-        if ($aiConversation->user_id !== $user->id) {
+        // Ensure the conversation strictly belongs to the authenticated user
+        // and is for the AI adviser purpose.
+        if ($aiConversation->user_id !== $user->id || $aiConversation->purpose !== 'ai_adviser') {
             return $this->forbidden('You are not part of this conversation.');
         }
 
-        $messages = $aiConversation->messages()->orderBy('created_at')->get()->map(function (AiMessage $message) use ($user) {
-            $role = $message->user_id === $user->id ? 'user' : 'assistant';
+        $messages = $aiConversation->messages()
+            ->orderBy('created_at')
+            ->get()
+            ->map(function (AiMessage $message) use ($user) {
+                $role = $message->user_id === $user->id ? 'user' : 'assistant';
 
-            return [
-                'id' => $message->id,
-                'role' => $role,
-                'content' => $message->content,
-                'created_at' => $message->created_at,
-            ];
-        });
+                return [
+                    'id' => $message->id,
+                    'role' => $role,
+                    'content' => $message->content,
+                    'created_at' => $message->created_at,
+                ];
+            });
 
         return $this->success('AI adviser conversation fetched.', [
             'conversation_id' => $aiConversation->id,
