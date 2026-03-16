@@ -98,50 +98,162 @@ class GeminiAiService
             throw new Exception('Gemini API response missing text candidate.');
         }
 
-        $text = (string) $data['candidates'][0]['content']['parts'][0]['text'];
-        $text = $this->formatResponse($text);
+        $rawText = (string) $data['candidates'][0]['content']['parts'][0]['text'];
+
+        $plainText = $this->stripMarkdown($rawText);
+        $sections = $this->parseIntoSections($rawText);
 
         $usage = $data['usageMetadata'] ?? null;
 
         return [
-            'text' => $text,
+            'text' => $plainText,
+            'sections' => $sections,
             'usage' => is_array($usage) ? $usage : null,
             'raw' => $data,
         ];
     }
 
     /**
-     * Strip markdown / decorative symbols so the response reads as clean
-     * plain text suitable for mobile or non-markdown consumers.
+     * Public access to section parsing for historical messages stored in DB.
      */
-    protected function formatResponse(string $text): string
+    public function buildSections(string $text): array
     {
-        // Remove bold/italic markers: ***, **, *
-        $text = preg_replace('/\*{1,3}/', '', $text);
+        return $this->parseIntoSections($text);
+    }
 
-        // Remove heading markers: ## Heading -> Heading
-        $text = preg_replace('/^#{1,6}\s*/m', '', $text);
+    // ------------------------------------------------------------------
+    //  Response formatting helpers
+    // ------------------------------------------------------------------
 
-        // Remove bullet-style leading dashes/plus at line start: - item -> item
-        $text = preg_replace('/^[\-\+]\s+/m', '', $text);
-
-        // Remove inline code backticks
-        $text = preg_replace('/`{1,3}/', '', $text);
-
-        // Remove horizontal rules (---, ***, ___)
-        $text = preg_replace('/^[\-\*_]{3,}\s*$/m', '', $text);
-
-        // Remove image/link markdown: ![alt](url) -> alt , [text](url) -> text
+    /**
+     * Remove all markdown symbols and return clean plain text.
+     */
+    protected function stripMarkdown(string $text): string
+    {
         $text = preg_replace('/!\[([^\]]*)\]\([^\)]*\)/', '$1', $text);
         $text = preg_replace('/\[([^\]]*)\]\([^\)]*\)/', '$1', $text);
 
-        // Remove blockquote markers
+        $text = preg_replace('/\*{1,3}/', '', $text);
+        $text = preg_replace('/^#{1,6}\s*/m', '', $text);
+        $text = preg_replace('/`{1,3}/', '', $text);
+        $text = preg_replace('/^[\-\*_]{3,}\s*$/m', '', $text);
         $text = preg_replace('/^>\s?/m', '', $text);
-
-        // Collapse 3+ consecutive newlines into 2
         $text = preg_replace('/\n{3,}/', "\n\n", $text);
 
         return trim($text);
+    }
+
+    /**
+     * Parse the raw Gemini markdown into structured sections so the
+     * frontend can render each block with proper styling.
+     *
+     * Returned array of sections, each with:
+     *   - type: "heading" | "paragraph" | "list" | "note"
+     *   - heading (only for "heading"): the heading text
+     *   - body (for "paragraph" / "note"): plain text string
+     *   - items (only for "list"): ordered array of list-item strings
+     */
+    protected function parseIntoSections(string $raw): array
+    {
+        $raw = preg_replace('/!\[([^\]]*)\]\([^\)]*\)/', '$1', $raw);
+        $raw = preg_replace('/\[([^\]]*)\]\([^\)]*\)/', '$1', $raw);
+        $raw = preg_replace('/\*{1,3}([^*]+)\*{1,3}/', '$1', $raw);
+        $raw = preg_replace('/`{1,3}([^`]*)`{1,3}/', '$1', $raw);
+
+        $lines = preg_split('/\r?\n/', $raw);
+
+        $sections = [];
+        $buffer = [];
+        $bufferType = null;
+
+        $flushBuffer = function () use (&$sections, &$buffer, &$bufferType) {
+            if (empty($buffer)) {
+                return;
+            }
+
+            if ($bufferType === 'list') {
+                $sections[] = [
+                    'type' => 'list',
+                    'items' => $buffer,
+                ];
+            } else {
+                $text = trim(implode("\n", $buffer));
+                if ($text !== '') {
+                    $sections[] = [
+                        'type' => 'paragraph',
+                        'body' => $text,
+                    ];
+                }
+            }
+
+            $buffer = [];
+            $bufferType = null;
+        };
+
+        foreach ($lines as $line) {
+            $trimmed = trim($line);
+
+            if ($trimmed === '' || preg_match('/^[\-\*_]{3,}$/', $trimmed)) {
+                $flushBuffer();
+                continue;
+            }
+
+            if (preg_match('/^#{1,6}\s+(.+)$/', $trimmed, $m)) {
+                $flushBuffer();
+                $sections[] = [
+                    'type' => 'heading',
+                    'heading' => trim($m[1]),
+                ];
+                continue;
+            }
+
+            if (preg_match('/^>\s?(.*)$/', $trimmed, $m)) {
+                $flushBuffer();
+                $sections[] = [
+                    'type' => 'note',
+                    'body' => trim($m[1]),
+                ];
+                continue;
+            }
+
+            if (preg_match('/^[\-\+\*]\s+(.+)$/', $trimmed, $m)) {
+                if ($bufferType !== 'list') {
+                    $flushBuffer();
+                    $bufferType = 'list';
+                }
+                $buffer[] = trim($m[1]);
+                continue;
+            }
+
+            if (preg_match('/^\d+[\.\)]\s+(.+)$/', $trimmed, $m)) {
+                if ($bufferType !== 'list') {
+                    $flushBuffer();
+                    $bufferType = 'list';
+                }
+                $buffer[] = trim($m[1]);
+                continue;
+            }
+
+            if ($bufferType === 'list') {
+                $flushBuffer();
+            }
+            $bufferType = 'paragraph';
+            $buffer[] = $trimmed;
+        }
+
+        $flushBuffer();
+
+        if (empty($sections)) {
+            $clean = $this->stripMarkdown($raw);
+            if ($clean !== '') {
+                $sections[] = [
+                    'type' => 'paragraph',
+                    'body' => $clean,
+                ];
+            }
+        }
+
+        return $sections;
     }
 }
 

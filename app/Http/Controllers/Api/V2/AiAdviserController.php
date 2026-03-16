@@ -10,23 +10,14 @@ use App\Services\GeminiAiService;
 use App\Traits\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 
 class AiAdviserController extends Controller
 {
     use ApiResponse;
 
-    /**
-     * Maximum number of previous messages to include in the AI context history
-     * when generating a reply. Kept intentionally small to reduce token usage.
-     */
     protected int $historyLimit;
 
-    /**
-     * Maximum characters per history message sent to the AI model.
-     * Older/long messages are trimmed to keep prompts lightweight.
-     */
     protected int $historyMessageMaxChars;
 
     public function __construct(
@@ -63,9 +54,16 @@ class AiAdviserController extends Controller
         );
 
         if ($usage->total_tokens + $newTokens > $limit) {
+            $remaining = max(0, $limit - (int) $usage->total_tokens);
+
             return $this->error(
                 'AI token limit exceeded. Please upgrade your AI subscription plan.',
-                402
+                402,
+                [
+                    'tokens_used' => (int) $usage->total_tokens,
+                    'tokens_limit' => $limit,
+                    'tokens_remaining' => $remaining,
+                ]
             );
         }
 
@@ -73,6 +71,79 @@ class AiAdviserController extends Controller
 
         return null;
     }
+
+    /**
+     * Build a consistent message object for API responses.
+     * Assistant messages include structured content_sections for easy UI rendering.
+     */
+    protected function formatMessageForResponse(AiMessage $message, int $authUserId, ?array $sections = null): array
+    {
+        $role = $message->user_id === $authUserId ? 'user' : 'assistant';
+
+        $formatted = [
+            'id' => $message->id,
+            'role' => $role,
+            'content' => $message->content,
+            'sent_at' => $message->created_at?->toIso8601String(),
+        ];
+
+        if ($role === 'assistant') {
+            $formatted['content_sections'] = $sections ?? $this->gemini->buildSections($message->content);
+        }
+
+        return $formatted;
+    }
+
+    /**
+     * Build a consistent conversation summary object for API responses.
+     */
+    protected function formatConversationSummary(AiConversation $conversation): array
+    {
+        $messageCount = $conversation->messages()->count();
+        $lastMessage = $conversation->messages()->latest()->first();
+
+        return [
+            'id' => $conversation->id,
+            'subject' => $conversation->subject,
+            'status' => $conversation->status,
+            'total_messages' => $messageCount,
+            'last_message_preview' => $lastMessage
+                ? Str::limit($lastMessage->content, 120)
+                : null,
+            'started_at' => $conversation->created_at?->toIso8601String(),
+            'last_active_at' => $conversation->last_used_at
+                ? $conversation->last_used_at->toIso8601String()
+                : $conversation->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Build a token-usage snapshot for the current user.
+     */
+    protected function buildTokenUsageSnapshot($user): array
+    {
+        $limit = $this->getUserTokenLimit($user);
+
+        $usage = AiUserUsage::firstOrCreate(
+            ['user_id' => $user->id],
+            ['total_tokens' => 0],
+        );
+
+        $used = (int) $usage->total_tokens;
+        $remaining = max(0, $limit - $used);
+        $percentage = $limit > 0 ? min(100, round(($used / $limit) * 100, 2)) : 0.0;
+
+        return [
+            'tokens_used' => $used,
+            'tokens_limit' => $limit,
+            'tokens_remaining' => $remaining,
+            'usage_percentage' => $percentage,
+        ];
+    }
+
+    // ------------------------------------------------------------------
+    //  Endpoints
+    // ------------------------------------------------------------------
 
     public function start(Request $request): JsonResponse
     {
@@ -113,14 +184,12 @@ class AiAdviserController extends Controller
             }
         }
 
-        $replyText = $result['text'];
-
         $aiUserId = (int) (config('gemini.system_user_id') ?: $user->id);
 
         $assistantMessage = AiMessage::create([
             'ai_conversation_id' => $aiConversation->id,
             'user_id' => $aiUserId,
-            'content' => $replyText,
+            'content' => $result['text'],
             'role' => 'assistant',
             'prompt_tokens' => (int) ($result['usage']['promptTokenCount'] ?? 0),
             'completion_tokens' => (int) ($result['usage']['candidatesTokenCount'] ?? 0),
@@ -129,13 +198,20 @@ class AiAdviserController extends Controller
             'raw_response' => $result['raw'],
         ]);
 
-        $aiConversation->update([
-            'last_used_at' => now(),
-        ]);
+        $aiConversation->update(['last_used_at' => now()]);
 
-        return $this->success('AI adviser response generated.', [
-            'conversation_id' => $aiConversation->id,
-            'message' => $assistantMessage->content,
+        return $this->success('AI adviser conversation started.', [
+            'conversation' => [
+                'id' => $aiConversation->id,
+                'subject' => $aiConversation->subject,
+                'status' => $aiConversation->status,
+                'started_at' => $aiConversation->created_at?->toIso8601String(),
+            ],
+            'messages' => [
+                $this->formatMessageForResponse($userMessage, $user->id),
+                $this->formatMessageForResponse($assistantMessage, $user->id, $result['sections']),
+            ],
+            'token_usage' => $this->buildTokenUsageSnapshot($user),
         ]);
     }
 
@@ -146,14 +222,10 @@ class AiAdviserController extends Controller
         ]);
         $user = $request->user();
 
-        // Ensure the conversation strictly belongs to the authenticated user
-        // and is for the AI adviser purpose.
         if ($aiConversation->user_id !== $user->id || $aiConversation->purpose !== 'ai_adviser') {
             return $this->forbidden('You are not part of this conversation.');
         }
 
-        // Build a trimmed history with only the most recent messages to reduce
-        // the number of tokens sent to the AI model.
         $history = $aiConversation->messages()
             ->latest()
             ->take($this->historyLimit)
@@ -170,7 +242,7 @@ class AiAdviserController extends Controller
             ->values()
             ->all();
 
-        AiMessage::create([
+        $userMessage = AiMessage::create([
             'ai_conversation_id' => $aiConversation->id,
             'user_id' => $user->id,
             'content' => $validated['message'],
@@ -191,14 +263,12 @@ class AiAdviserController extends Controller
             }
         }
 
-        $replyText = $result['text'];
-
         $aiUserId = (int) (config('gemini.system_user_id') ?: $user->id);
 
         $assistantMessage = AiMessage::create([
             'ai_conversation_id' => $aiConversation->id,
             'user_id' => $aiUserId,
-            'content' => $replyText,
+            'content' => $result['text'],
             'role' => 'assistant',
             'prompt_tokens' => (int) ($result['usage']['promptTokenCount'] ?? 0),
             'completion_tokens' => (int) ($result['usage']['candidatesTokenCount'] ?? 0),
@@ -207,13 +277,20 @@ class AiAdviserController extends Controller
             'raw_response' => $result['raw'],
         ]);
 
-        $aiConversation->update([
-            'last_used_at' => now(),
-        ]);
+        $aiConversation->update(['last_used_at' => now()]);
 
-        return $this->success('AI adviser response generated.', [
-            'conversation_id' => $aiConversation->id,
-            'message' => $assistantMessage->content,
+        $totalMessages = $aiConversation->messages()->count();
+
+        return $this->success('AI adviser reply received.', [
+            'conversation' => [
+                'id' => $aiConversation->id,
+                'subject' => $aiConversation->subject,
+                'status' => $aiConversation->status,
+                'total_messages' => $totalMessages,
+            ],
+            'user_message' => $this->formatMessageForResponse($userMessage, $user->id),
+            'assistant_message' => $this->formatMessageForResponse($assistantMessage, $user->id, $result['sections']),
+            'token_usage' => $this->buildTokenUsageSnapshot($user),
         ]);
     }
 
@@ -221,20 +298,31 @@ class AiAdviserController extends Controller
     {
         $user = $request->user();
 
-        $conversations = AiConversation::where('user_id', $user->id)
+        $paginator = AiConversation::where('user_id', $user->id)
             ->where('purpose', 'ai_adviser')
             ->orderByDesc('last_used_at')
             ->paginate(15);
 
-        return $this->paginated($conversations, 'AI adviser conversations fetched.');
+        $conversations = collect($paginator->items())->map(
+            fn (AiConversation $c) => $this->formatConversationSummary($c)
+        );
+
+        return $this->success('AI adviser conversations fetched.', [
+            'conversations' => $conversations,
+            'pagination' => [
+                'current_page' => $paginator->currentPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'last_page' => $paginator->lastPage(),
+                'has_more' => $paginator->hasMorePages(),
+            ],
+        ]);
     }
 
     public function show(Request $request, AiConversation $aiConversation): JsonResponse
     {
         $user = $request->user();
 
-        // Ensure the conversation strictly belongs to the authenticated user
-        // and is for the AI adviser purpose.
         if ($aiConversation->user_id !== $user->id || $aiConversation->purpose !== 'ai_adviser') {
             return $this->forbidden('You are not part of this conversation.');
         }
@@ -242,19 +330,20 @@ class AiAdviserController extends Controller
         $messages = $aiConversation->messages()
             ->orderBy('created_at')
             ->get()
-            ->map(function (AiMessage $message) use ($user) {
-                $role = $message->user_id === $user->id ? 'user' : 'assistant';
+            ->map(fn (AiMessage $m) => $this->formatMessageForResponse($m, $user->id))
+            ->values();
 
-                return [
-                    'id' => $message->id,
-                    'role' => $role,
-                    'content' => $message->content,
-                    'created_at' => $message->created_at,
-                ];
-            });
-
-        return $this->success('AI adviser conversation fetched.', [
-            'conversation_id' => $aiConversation->id,
+        return $this->success('AI adviser conversation details.', [
+            'conversation' => [
+                'id' => $aiConversation->id,
+                'subject' => $aiConversation->subject,
+                'status' => $aiConversation->status,
+                'total_messages' => $messages->count(),
+                'started_at' => $aiConversation->created_at?->toIso8601String(),
+                'last_active_at' => $aiConversation->last_used_at
+                    ? $aiConversation->last_used_at->toIso8601String()
+                    : $aiConversation->updated_at?->toIso8601String(),
+            ],
             'messages' => $messages,
         ]);
     }
@@ -262,21 +351,11 @@ class AiAdviserController extends Controller
     public function usage(Request $request): JsonResponse
     {
         $user = $request->user();
+        $snapshot = $this->buildTokenUsageSnapshot($user);
 
-        $limit = $this->getUserTokenLimit($user);
-
-        $usage = AiUserUsage::firstOrCreate(
-            ['user_id' => $user->id],
-            ['total_tokens' => 0],
-        );
-
-        $totalTokens = (int) $usage->total_tokens;
-        $percentage = $limit > 0 ? min(100, round(($totalTokens / $limit) * 100, 2)) : 0.0;
-
-        return $this->success('AI adviser token usage fetched.', [
-            'total_tokens' => $totalTokens,
-            'plan_limit_tokens' => $limit,
-            'percentage_used' => $percentage,
+        return $this->success('AI adviser token usage.', [
+            'token_usage' => $snapshot,
+            'is_limit_reached' => $snapshot['tokens_remaining'] <= 0,
         ]);
     }
 }
