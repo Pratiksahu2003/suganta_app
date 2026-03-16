@@ -11,8 +11,9 @@ use Illuminate\Support\Facades\Storage;
  * @param string|null $disk The storage disk (default: from config)
  * @return string The full URL
  */
-function storage_file_url(string $path, ?string $disk = null): string
+function storage_file_url(string $path = null, ?string $disk = null): string
 {
+    if(is_null($path))  return  asset('img/no.jpg') ;
     $disk = $disk ?? config('filesystems.upload_disk', 'public');
 
     if ($disk === 'gcs') {
