@@ -13,7 +13,9 @@ return new class extends Migration
     {
         Schema::connection('ai_mysql')->create('ai_messages', function (Blueprint $table) {
             $table->id();
-            $table->unsignedBigInteger('message_id');
+            $table->unsignedBigInteger('ai_conversation_id');
+            $table->unsignedBigInteger('user_id');
+            $table->text('content');
             $table->string('role');
             $table->unsignedBigInteger('prompt_tokens')->default(0);
             $table->unsignedBigInteger('completion_tokens')->default(0);
@@ -22,7 +24,8 @@ return new class extends Migration
             $table->json('raw_response')->nullable();
             $table->timestamps();
 
-            $table->unique('message_id');
+            $table->index('ai_conversation_id');
+            $table->index('user_id');
             $table->index('role');
             $table->index('created_at');
         });

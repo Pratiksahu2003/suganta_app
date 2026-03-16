@@ -4,6 +4,7 @@ namespace App\Models\Ai;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class AiConversation extends Model
 {
@@ -14,7 +15,9 @@ class AiConversation extends Model
     protected $table = 'ai_conversations';
 
     protected $fillable = [
-        'conversation_id',
+        'user_id',
+        'subject',
+        'status',
         'model',
         'purpose',
         'settings',
@@ -30,5 +33,10 @@ class AiConversation extends Model
         'settings' => 'array',
         'last_used_at' => 'datetime',
     ];
+
+    public function messages(): HasMany
+    {
+        return $this->hasMany(AiMessage::class, 'ai_conversation_id')->orderBy('created_at');
+    }
 }
 

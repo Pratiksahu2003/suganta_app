@@ -6,8 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Models\Ai\AiConversation;
 use App\Models\Ai\AiMessage;
 use App\Models\Ai\AiUserUsage;
-use App\Models\Conversation;
-use App\Models\Message;
 use App\Services\GeminiAiService;
 use App\Traits\ApiResponse;
 use Illuminate\Http\JsonResponse;
@@ -70,31 +68,19 @@ class AiAdviserController extends Controller
 
         $user = Auth::user();
 
-        $conversation = Conversation::create([
-            'initiator_id' => $user->id,
-            'participant_id' => $user->id,
-            'subject' => $validated['subject'] ?? null,
-            'type' => 'general',
-            'status' => 'active',
-            'last_message_at' => now(),
-        ]);
-
         $aiConversation = AiConversation::create([
-            'conversation_id' => $conversation->id,
+            'user_id' => $user->id,
+            'subject' => $validated['subject'] ?? null,
+            'status' => 'active',
             'model' => config('gemini.model_id', 'gemini-2.5-flash-lite'),
             'purpose' => 'ai_adviser',
             'settings' => [],
         ]);
 
-        $userMessage = Message::create([
-            'conversation_id' => $conversation->id,
-            'sender_id' => $user->id,
+        $userMessage = AiMessage::create([
+            'ai_conversation_id' => $aiConversation->id,
+            'user_id' => $user->id,
             'content' => $validated['message'],
-            'type' => 'text',
-        ]);
-
-        AiMessage::create([
-            'message_id' => $userMessage->id,
             'role' => 'user',
         ]);
 
@@ -114,17 +100,12 @@ class AiAdviserController extends Controller
 
         $replyText = $result['text'];
 
-        $aiUserId = config('gemini.system_user_id') ?: $user->id;
+        $aiUserId = (int) (config('gemini.system_user_id') ?: $user->id);
 
-        $assistantMessage = Message::create([
-            'conversation_id' => $conversation->id,
-            'sender_id' => $aiUserId,
+        $assistantMessage = AiMessage::create([
+            'ai_conversation_id' => $aiConversation->id,
+            'user_id' => $aiUserId,
             'content' => $replyText,
-            'type' => 'system',
-        ]);
-
-        AiMessage::create([
-            'message_id' => $assistantMessage->id,
             'role' => 'assistant',
             'prompt_tokens' => (int) ($result['usage']['promptTokenCount'] ?? 0),
             'completion_tokens' => (int) ($result['usage']['candidatesTokenCount'] ?? 0),
@@ -138,12 +119,12 @@ class AiAdviserController extends Controller
         ]);
 
         return $this->success('AI adviser response generated.', [
-            'conversation_id' => $conversation->id,
+            'conversation_id' => $aiConversation->id,
             'message' => $assistantMessage->content,
         ]);
     }
 
-    public function reply(Request $request, Conversation $conversation): JsonResponse
+    public function reply(Request $request, AiConversation $aiConversation): JsonResponse
     {
         $validated = $request->validate([
             'message' => ['required', 'string'],
@@ -151,24 +132,15 @@ class AiAdviserController extends Controller
 
         $user = Auth::user();
 
-        if (! $conversation->involvesUser($user->id)) {
+        if ($aiConversation->user_id !== $user->id) {
             return $this->forbidden('You are not part of this conversation.');
         }
 
-        $aiConversation = AiConversation::firstOrCreate(
-            ['conversation_id' => $conversation->id],
-            [
-                'model' => config('gemini.model_id', 'gemini-2.5-flash-lite'),
-                'purpose' => 'ai_adviser',
-                'settings' => [],
-            ],
-        );
-
-        $history = $conversation->messages()
+        $history = $aiConversation->messages()
             ->orderBy('created_at')
             ->get()
-            ->map(function (Message $message) use ($user) {
-                $role = $message->sender_id === $user->id ? 'user' : 'assistant';
+            ->map(function (AiMessage $message) use ($user) {
+                $role = $message->user_id === $user->id ? 'user' : 'assistant';
 
                 return [
                     'role' => $role,
@@ -177,15 +149,10 @@ class AiAdviserController extends Controller
             })
             ->all();
 
-        $userMessage = Message::create([
-            'conversation_id' => $conversation->id,
-            'sender_id' => $user->id,
+        $userMessage = AiMessage::create([
+            'ai_conversation_id' => $aiConversation->id,
+            'user_id' => $user->id,
             'content' => $validated['message'],
-            'type' => 'text',
-        ]);
-
-        AiMessage::create([
-            'message_id' => $userMessage->id,
             'role' => 'user',
         ]);
 
@@ -205,17 +172,12 @@ class AiAdviserController extends Controller
 
         $replyText = $result['text'];
 
-        $aiUserId = config('gemini.system_user_id') ?: $user->id;
+        $aiUserId = (int) (config('gemini.system_user_id') ?: $user->id);
 
-        $assistantMessage = Message::create([
-            'conversation_id' => $conversation->id,
-            'sender_id' => $aiUserId,
+        $assistantMessage = AiMessage::create([
+            'ai_conversation_id' => $aiConversation->id,
+            'user_id' => $aiUserId,
             'content' => $replyText,
-            'type' => 'system',
-        ]);
-
-        AiMessage::create([
-            'message_id' => $assistantMessage->id,
             'role' => 'assistant',
             'prompt_tokens' => (int) ($result['usage']['promptTokenCount'] ?? 0),
             'completion_tokens' => (int) ($result['usage']['candidatesTokenCount'] ?? 0),
@@ -224,16 +186,12 @@ class AiAdviserController extends Controller
             'raw_response' => $result['raw'],
         ]);
 
-        $conversation->update([
-            'last_message_at' => now(),
-        ]);
-
         $aiConversation->update([
             'last_used_at' => now(),
         ]);
 
         return $this->success('AI adviser response generated.', [
-            'conversation_id' => $conversation->id,
+            'conversation_id' => $aiConversation->id,
             'message' => $assistantMessage->content,
         ]);
     }
@@ -242,26 +200,24 @@ class AiAdviserController extends Controller
     {
         $user = Auth::user();
 
-        $conversations = Conversation::where('initiator_id', $user->id)
-            ->whereHas(\App\Models\Ai\AiConversation::class, function ($query) {
-                $query->where('purpose', 'ai_adviser');
-            })
-            ->orderByDesc('last_message_at')
+        $conversations = AiConversation::where('user_id', $user->id)
+            ->where('purpose', 'ai_adviser')
+            ->orderByDesc('last_used_at')
             ->paginate(15);
 
         return $this->paginated($conversations, 'AI adviser conversations fetched.');
     }
 
-    public function show(Request $request, Conversation $conversation): JsonResponse
+    public function show(Request $request, AiConversation $aiConversation): JsonResponse
     {
         $user = Auth::user();
 
-        if (! $conversation->involvesUser($user->id)) {
+        if ($aiConversation->user_id !== $user->id) {
             return $this->forbidden('You are not part of this conversation.');
         }
 
-        $messages = $conversation->messages()->orderBy('created_at')->get()->map(function (Message $message) use ($user) {
-            $role = $message->sender_id === $user->id ? 'user' : 'assistant';
+        $messages = $aiConversation->messages()->orderBy('created_at')->get()->map(function (AiMessage $message) use ($user) {
+            $role = $message->user_id === $user->id ? 'user' : 'assistant';
 
             return [
                 'id' => $message->id,
@@ -272,7 +228,7 @@ class AiAdviserController extends Controller
         });
 
         return $this->success('AI adviser conversation fetched.', [
-            'conversation_id' => $conversation->id,
+            'conversation_id' => $aiConversation->id,
             'messages' => $messages,
         ]);
     }

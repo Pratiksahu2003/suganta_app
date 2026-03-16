@@ -13,7 +13,9 @@ return new class extends Migration
     {
         Schema::connection('ai_mysql')->create('ai_conversations', function (Blueprint $table) {
             $table->id();
-            $table->unsignedBigInteger('conversation_id');
+            $table->unsignedBigInteger('user_id');
+            $table->string('subject')->nullable();
+            $table->string('status')->default('active');
             $table->string('model')->default('gemini-2.5-flash-lite');
             $table->string('purpose')->nullable();
             $table->json('settings')->nullable();
@@ -25,9 +27,10 @@ return new class extends Migration
             $table->text('last_error_message')->nullable();
             $table->timestamps();
 
-            $table->unique('conversation_id');
+            $table->index('user_id');
             $table->index('model');
             $table->index('purpose');
+            $table->index('status');
             $table->index('last_used_at');
         });
     }
