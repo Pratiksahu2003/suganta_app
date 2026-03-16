@@ -5,6 +5,9 @@ namespace App\Traits;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Http\Resources\Json\ResourceCollection;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Contracts\Pagination\Paginator;
+use Illuminate\Support\Collection;
 use Symfony\Component\HttpFoundation\Response;
 
 trait ApiResponse
@@ -128,8 +131,35 @@ trait ApiResponse
      */
     public function paginated(mixed $data, string $message = 'Success'): JsonResponse
     {
-        $resource = $data;
-        $response = $resource->response()->getData(true);
+        // Support both API Resources and plain paginator/collection instances
+        if ($data instanceof JsonResource) {
+            $response = $data->response()->getData(true);
+        } elseif ($data instanceof ResourceCollection) {
+            $response = $data->response()->getData(true);
+        } elseif ($data instanceof LengthAwarePaginator) {
+            $response = [
+                'data' => $data->items(),
+                'current_page' => $data->currentPage(),
+                'per_page' => $data->perPage(),
+                'total' => $data->total(),
+                'last_page' => $data->lastPage(),
+            ];
+        } elseif ($data instanceof Paginator) {
+            $response = [
+                'data' => $data->items(),
+                'current_page' => $data->currentPage(),
+                'per_page' => $data->perPage(),
+            ];
+        } elseif ($data instanceof Collection) {
+            $response = [
+                'data' => $data,
+            ];
+        } else {
+            $response = [
+                'data' => $data,
+            ];
+        }
+
         $response['success'] = true;
         $response['message'] = $message;
         $response['code'] = Response::HTTP_OK;
