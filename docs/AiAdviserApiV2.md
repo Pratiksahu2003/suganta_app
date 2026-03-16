@@ -68,6 +68,11 @@ AI_FREE_TOKENS=100000
 
 # Subscription type id for AI plans
 AI_SUBSCRIPTION_TYPE=2
+
+# Prompt / response optimization (defaults shown)
+GEMINI_HISTORY_LIMIT=10
+GEMINI_HISTORY_MESSAGE_MAX_CHARS=800
+GEMINI_MAX_OUTPUT_TOKENS=500
 ```
 
 `config/gemini.php` reads these values:
@@ -77,6 +82,9 @@ AI_SUBSCRIPTION_TYPE=2
 - `system_user_id`
 - `free_token_limit`
 - `subscription_type`
+- `history_limit`
+- `history_message_max_chars`
+- `max_output_tokens`
 
 ---
 
