@@ -465,7 +465,6 @@ class PublicTeacherController extends BaseApiController
             'availability_status' => $options['availability_status'],
             'travel_radius_km' => $options['travel_radius_km'],
             'teaching_philosophy' => $profile->teaching_philosophy ?? $teachingInfo?->teaching_philosophy,
-            'subjects_taught' => $teachingInfo?->subjects_taught ?? $profile->subjects_taught ?? [],
             'online_classes' => (bool) ($teachingInfo?->online_classes ?? $profile->online_classes ?? false),
             'home_tuition' => (bool) ($teachingInfo?->home_tuition ?? $profile->home_tuition ?? false),
             'institute_classes' => (bool) ($teachingInfo?->institute_classes ?? $profile->institute_classes ?? false),
@@ -486,15 +485,10 @@ class PublicTeacherController extends BaseApiController
             'location' => $location,
             'social' => $socialData,
             'teaching' => $teachingData,
-            'rating' => (float) ($teachingInfo?->rating ?? 0),
-            'total_reviews' => (int) ($teachingInfo?->total_reviews ?? 0),
-            'total_students' => (int) ($teachingInfo?->total_students ?? $profile->total_students ?? 0),
             'subjects' => $subjects,
             'portfolio' => $this->formatPortfolio($user->portfolio),
-            'institute' => null,
             'verified' => (bool) ($teachingInfo?->verified ?? false),
             'is_featured' => false,
-            'reviews_sample' => $reviewsFormatted,
         ];
     }
 
