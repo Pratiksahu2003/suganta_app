@@ -29,7 +29,7 @@ class AiSubscriptionPlanSeeder extends Seeder
                 'is_popular' => false,
                 'is_active' => true,
                 'sort_order' => 1,
-                's_type' => 2,
+                's_type' => 3,
             ],
             [
                 'name' => 'AI Pro',
