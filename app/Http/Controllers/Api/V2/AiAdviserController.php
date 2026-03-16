@@ -258,5 +258,26 @@ class AiAdviserController extends Controller
             'messages' => $messages,
         ]);
     }
+
+    public function usage(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        $limit = $this->getUserTokenLimit($user);
+
+        $usage = AiUserUsage::firstOrCreate(
+            ['user_id' => $user->id],
+            ['total_tokens' => 0],
+        );
+
+        $totalTokens = (int) $usage->total_tokens;
+        $percentage = $limit > 0 ? min(100, round(($totalTokens / $limit) * 100, 2)) : 0.0;
+
+        return $this->success('AI adviser token usage fetched.', [
+            'total_tokens' => $totalTokens,
+            'plan_limit_tokens' => $limit,
+            'percentage_used' => $percentage,
+        ]);
+    }
 }
 

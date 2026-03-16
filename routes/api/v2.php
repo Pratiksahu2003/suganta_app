@@ -9,6 +9,7 @@ Route::prefix('v2')->middleware('auth:sanctum')->group(function (): void {
         Route::post('conversations/{aiConversation}/message', 'reply');
         Route::get('conversations', 'index');
         Route::get('conversations/{aiConversation}', 'show');
+        Route::get('usage', 'usage');
     });
 });
 

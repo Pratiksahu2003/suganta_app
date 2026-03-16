@@ -12,5 +12,14 @@ return [
 
     // Subscription type id for AI plans (Basic / Pro / Advance)
     'subscription_type' => (int) env('AI_SUBSCRIPTION_TYPE', 3),
+
+    // Maximum number of previous messages to send as history context.
+    'history_limit' => (int) env('GEMINI_HISTORY_LIMIT', 10),
+
+    // Maximum characters per history message sent to the model.
+    'history_message_max_chars' => (int) env('GEMINI_HISTORY_MESSAGE_MAX_CHARS', 800),
+
+    // Maximum completion length in tokens for each AI response.
+    'max_output_tokens' => (int) env('GEMINI_MAX_OUTPUT_TOKENS', 500),
 ];
 

@@ -14,6 +14,7 @@ class GeminiAiService
     {
         $apiKey = config('gemini.api_key');
         $modelId = config('gemini.model_id', 'gemini-2.5-flash-lite');
+        $maxOutputTokens = (int) config('gemini.max_output_tokens', 500);
 
         if (empty($apiKey)) {
             throw new Exception('Gemini API key is not configured.');
@@ -51,6 +52,10 @@ class GeminiAiService
             'x-goog-api-key' => $apiKey,
         ])->post($url, [
             'contents' => $contents,
+            'generationConfig' => [
+                // Limit completion length to keep responses around 300–500 tokens.
+                'maxOutputTokens' => $maxOutputTokens,
+            ],
         ]);
 
         if (! $response->successful()) {
