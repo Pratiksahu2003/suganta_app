@@ -40,4 +40,12 @@ class Payment extends Model
     {
         return $this->hasOne(UserSubscription::class);
     }
+
+    /**
+     * Get the note purchase associated with this payment
+     */
+    public function notePurchase()
+    {
+        return $this->hasOne(NotePurchase::class);
+    }
 }

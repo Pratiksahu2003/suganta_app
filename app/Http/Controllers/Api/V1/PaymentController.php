@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Models\Payment;
 use App\Models\User;
+use App\Models\UserSubscription;
 use App\Services\CashfreeService;
+use App\Services\NotePurchaseService;
 use App\Services\RegistrationPaymentService;
 use App\Services\SubscriptionService;
 use Illuminate\Http\JsonResponse;
@@ -19,7 +21,8 @@ class PaymentController extends BaseApiController
     public function __construct(
         protected CashfreeService $cashfree,
         protected RegistrationPaymentService $registrationPaymentService,
-        protected SubscriptionService $subscriptionService
+        protected SubscriptionService $subscriptionService,
+        protected NotePurchaseService $notePurchaseService
     ) {}
 
     /**
@@ -61,6 +64,37 @@ class PaymentController extends BaseApiController
                 'prev'  => $data->previousPageUrl(),
                 'next'  => $data->nextPageUrl(),
             ],
+        ]);
+    }
+
+    /**
+     * Get payment status by order_id (for polling after checkout).
+     */
+    public function status(Request $request): JsonResponse
+    {
+        $orderId = $request->query('order_id');
+        if (!$orderId) {
+            return $this->error('Missing order_id parameter.', Response::HTTP_BAD_REQUEST);
+        }
+
+        /** @var User $user */
+        $user = Auth::user();
+
+        $payment = Payment::where('order_id', $orderId)
+            ->where('user_id', $user->id)
+            ->first();
+
+        if (!$payment) {
+            return $this->notFound('Payment not found or access denied.');
+        }
+
+        return $this->success('Payment status retrieved.', [
+            'order_id' => $payment->order_id,
+            'status' => $payment->status,
+            'type' => $payment->meta['type'] ?? null,
+            'amount' => (float) $payment->amount,
+            'currency' => $payment->currency,
+            'processed_at' => $payment->processed_at?->toIso8601String(),
         ]);
     }
 
@@ -148,6 +182,8 @@ class PaymentController extends BaseApiController
             
             if ($paymentType === 'subscription') {
                 $checkoutData = $this->subscriptionService->getFreshCheckoutData($payment);
+            } elseif ($paymentType === 'note') {
+                $checkoutData = $this->notePurchaseService->getFreshCheckoutData($payment);
             } else {
                 $checkoutData = $this->registrationPaymentService->getFreshCheckoutData($payment);
             }
@@ -381,7 +417,14 @@ HTML;
                     ]);
                 }
 
-                $this->registrationPaymentService->handlePaymentSuccess($orderId, $cfPaymentData);
+                $paymentType = $payment->meta['type'] ?? '';
+                if ($paymentType === 'subscription') {
+                    $this->subscriptionService->processSuccessfulPayment($payment, $cfPaymentData);
+                } elseif ($paymentType === 'note') {
+                    $this->notePurchaseService->processSuccessfulPayment($payment, $cfPaymentData);
+                } else {
+                    $this->registrationPaymentService->handlePaymentSuccess($orderId, $cfPaymentData);
+                }
 
                 return $this->success('Payment successful.', [
                     'order_id' => $orderId,
@@ -390,7 +433,14 @@ HTML;
             }
 
             if (in_array($orderStatus, ['EXPIRED', 'CANCELLED'], true)) {
-                $this->registrationPaymentService->handlePaymentFailure($orderId, $orderData);
+                $paymentType = $payment->meta['type'] ?? '';
+                if ($paymentType === 'subscription') {
+                    $payment->update(['status' => 'failed', 'processed_at' => now(), 'gateway_response' => array_merge($payment->gateway_response ?? [], ['payment_data' => $orderData])]);
+                } elseif ($paymentType === 'note') {
+                    $payment->update(['status' => 'failed', 'processed_at' => now(), 'gateway_response' => array_merge($payment->gateway_response ?? [], ['payment_data' => $orderData])]);
+                } else {
+                    $this->registrationPaymentService->handlePaymentFailure($orderId, $orderData);
+                }
 
                 return $this->success('Payment could not be completed.', [
                     'order_id' => $orderId,
@@ -537,6 +587,22 @@ HTML;
                     ]);
                 }
                 break;
+
+            case 'note':
+                try {
+                    $this->notePurchaseService->processSuccessfulPayment($payment, $paymentData);
+                    Log::info('Note purchase payment processed successfully', [
+                        'order_id' => $orderId,
+                        'payment_id' => $payment->id,
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('Failed to process note purchase payment', [
+                        'order_id' => $orderId,
+                        'payment_id' => $payment->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+                break;
                 
             default:
                 Log::warning('Payment success webhook: unknown payment type', [
@@ -577,6 +643,22 @@ HTML;
                 ]);
                 
                 Log::info('Subscription payment failed', [
+                    'order_id' => $orderId,
+                    'payment_id' => $payment->id,
+                ]);
+                break;
+
+            case 'note':
+                $payment->update([
+                    'status' => 'failed',
+                    'processed_at' => now(),
+                    'gateway_response' => array_merge(
+                        $payment->gateway_response ?? [],
+                        ['payment_data' => $paymentData]
+                    ),
+                ]);
+                
+                Log::info('Note purchase payment failed', [
                     'order_id' => $orderId,
                     'payment_id' => $payment->id,
                 ]);
@@ -639,6 +721,34 @@ HTML;
                     }
                 }
                 break;
+
+            case 'note':
+                $refundStatus = strtoupper($paymentData['refund_status'] ?? $paymentData['status'] ?? '');
+                
+                if (in_array($refundStatus, ['SUCCESS', 'PROCESSED', 'COMPLETED'], true)) {
+                    $payment->update([
+                        'status' => 'refunded',
+                        'processed_at' => now(),
+                        'gateway_response' => array_merge(
+                            $payment->gateway_response ?? [],
+                            [
+                                'refund_data' => $paymentData,
+                                'refund_processed_at' => now()->toISOString()
+                            ]
+                        ),
+                    ]);
+
+                    $notePurchase = \App\Models\NotePurchase::where('payment_id', $payment->id)->first();
+                    if ($notePurchase) {
+                        $notePurchase->update(['status' => 'refunded']);
+                        
+                        Log::info('Note purchase refunded', [
+                            'order_id' => $orderId,
+                            'note_purchase_id' => $notePurchase->id,
+                        ]);
+                    }
+                }
+                break;
                 
             default:
                 Log::warning('Refund status webhook: unknown payment type', [
@@ -684,10 +794,20 @@ HTML;
             'amount'       => (float) $payment->amount,
             'status'       => $payment->status,
             'type'         => $payment->meta['type'] ?? null,
-            'description'  => $payment->meta['description'] ?? null,
+            'description'  => $payment->meta['description'] ?? $payment->meta['note_name'] ?? $payment->meta['plan_name'] ?? null,
             'created_at'   => $payment->created_at->toIso8601String(),
             'processed_at' => $payment->processed_at?->toIso8601String(),
         ];
+
+        if (($payment->meta['type'] ?? '') === 'note') {
+            $data['note_id'] = $payment->meta['note_id'] ?? null;
+            $data['note_name'] = $payment->meta['note_name'] ?? null;
+        }
+
+        if (($payment->meta['type'] ?? '') === 'subscription') {
+            $data['subscription_plan_id'] = $payment->meta['subscription_plan_id'] ?? null;
+            $data['plan_name'] = $payment->meta['plan_name'] ?? null;
+        }
 
         if ($payment->status === 'success') {
             $data['invoice_url'] = $this->generateInvoiceUrl($payment->order_id);

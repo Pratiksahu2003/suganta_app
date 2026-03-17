@@ -105,6 +105,7 @@ Route::prefix(config('api.version', 'v1'))->group(function (): void {
     // Payment Routes (auth user's data only)
     Route::middleware('auth:sanctum')->prefix('payments')->controller(PaymentController::class)->group(function () {
         Route::get('/', 'index');
+        Route::get('status', 'status');
         Route::get('invoice/{orderId}', 'invoice');
     });
 

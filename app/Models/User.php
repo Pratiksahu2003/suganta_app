@@ -740,6 +740,14 @@ class User extends Authenticatable implements MustVerifyEmail, CanResetPassword
     }
 
     /**
+     * Get note purchases for this user
+     */
+    public function notePurchases()
+    {
+        return $this->hasMany(NotePurchase::class);
+    }
+
+    /**
      * Get portfolio upload limits based on subscription (s_type = 1 = Portfolio plans).
      * If no active subscription: uses free plan (s_type=1, price=0) from subscription_plans.
      */

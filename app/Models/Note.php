@@ -59,14 +59,11 @@ class Note extends Model
     }
 
     /**
-     * Get the file URL
+     * Get the file URL (uses storage_file_url for configurable disk / signed URLs).
      */
     public function getFileUrlAttribute()
     {
-        if ($this->file_path) {
-            return asset('storage/' . $this->file_path);
-        }
-        return null;
+        return $this->file_path ? storage_file_url($this->file_path) : null;
     }
 
     /**
@@ -74,8 +71,9 @@ class Note extends Model
      */
     public function getFileSizeAttribute()
     {
-        if ($this->file_path && Storage::disk('public')->exists($this->file_path)) {
-            $bytes = Storage::disk('public')->size($this->file_path);
+        $disk = config('filesystems.upload_disk', 'public');
+        if ($this->file_path && Storage::disk($disk)->exists($this->file_path)) {
+            $bytes = Storage::disk($disk)->size($this->file_path);
             $units = ['B', 'KB', 'MB', 'GB'];
             for ($i = 0; $bytes > 1024 && $i < count($units) - 1; $i++) {
                 $bytes /= 1024;

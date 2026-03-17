@@ -76,11 +76,13 @@ class SubscriptionPlan extends Model
         return $query->where('price', 0);
     }
 
-    public static function scopeSpecificPlan( $s_type =1)
+    /**
+     * Scope for plans of a specific type (e.g. s_type=1 for notes/subscription plans).
+     */
+    public function scopeSpecificPlan($query, int $sType = 1)
     {
-        return self::where('s_type', $s_type )
-        ->orderBy('sort_order', 'asc')
-        ->orderBy('price', 'asc')
-        ->get();
+        return $query->where('s_type', $sType)
+            ->orderBy('sort_order', 'asc')
+            ->orderBy('price', 'asc');
     }
 }
