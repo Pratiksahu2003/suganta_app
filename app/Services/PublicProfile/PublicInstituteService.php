@@ -2,107 +2,134 @@
 
 namespace App\Services\PublicProfile;
 
-use App\Models\Institute;
+use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 class PublicInstituteService
 {
     private const RELATED_CACHE_TTL = 300;
 
-    private const LIST_RELATIONS = ['subjects:id,name,slug'];
+    private const LIST_RELATIONS = [
+        'profile:id,user_id,display_name,first_name,last_name,bio,city,state,area,pincode,profile_image,slug,is_active,is_featured,is_verified,latitude,longitude',
+        'profile.instituteInfo',
+    ];
 
     private const SHOW_RELATIONS = [
-        'user:id,name,email',
-        'user.profile.instituteInfo',
-        'user.profile.socialLinks',
-        'subjects:id,name,slug,category',
-        'exams:id,name,slug',
+        'profile',
+        'profile.instituteInfo',
+        'profile.socialLinks',
     ];
 
-    private const SHOW_COUNTS = ['teachers', 'childBranches', 'subjects'];
-
-    private const SORT_COLUMNS = [
-        'name'        => 'institute_name',
-        'rating'      => 'rating',
-        'established' => 'established_year',
-        'students'    => 'total_students',
-        'teachers'    => 'teachers_count',
-        'recent'      => 'created_at',
+    private const SORT_MAP = [
+        'name_asc'        => ['table' => 'profile_institute_info', 'column' => 'institute_name', 'direction' => 'asc'],
+        'name_desc'       => ['table' => 'profile_institute_info', 'column' => 'institute_name', 'direction' => 'desc'],
+        'established_asc' => ['table' => 'profile_institute_info', 'column' => 'establishment_year_id', 'direction' => 'asc'],
+        'established_desc'=> ['table' => 'profile_institute_info', 'column' => 'establishment_year_id', 'direction' => 'desc'],
+        'students_asc'    => ['table' => 'profile_institute_info', 'column' => 'total_students_id', 'direction' => 'asc'],
+        'students_desc'   => ['table' => 'profile_institute_info', 'column' => 'total_students_id', 'direction' => 'desc'],
     ];
 
-    private const PROFILE_INFO_FILTERS = [
-        'institute_type'          => 'institute_type_id',
-        'institute_category'      => 'institute_category_id',
+    /**
+     * Param => profile_institute_info column mapping for DRY whereHas filters.
+     */
+    private const INSTITUTE_INFO_FILTERS = [
+        'institute_type'           => 'institute_type_id',
+        'type'                     => 'institute_type_id',
+        'institute_category'       => 'institute_category_id',
+        'category'                 => 'institute_category_id',
         'establishment_year_range' => 'establishment_year_id',
-        'total_students_range'    => 'total_students_id',
-        'total_teachers_range'    => 'total_teachers_id',
+        'established'              => 'establishment_year_id',
+        'total_students_range'     => 'total_students_id',
+        'total_teachers_range'     => 'total_teachers_id',
+        'total_teachers'           => 'total_teachers_id',
     ];
 
-    // ─── List query ──────────────────────────────────────────────
+    // ─── List ────────────────────────────────────────────────────
 
     public function listQuery(Request $request): Builder
     {
         $query = $this->baseListQuery();
-
         $this->applyFilters($query, $request);
         $this->applySorting($query, $request);
-
         return $query;
     }
 
     public function baseListQuery(): Builder
     {
-        return Institute::query()
-            ->forPublicListing()
-            ->with(self::LIST_RELATIONS)
-            ->withCount('teachers');
+        return User::with(self::LIST_RELATIONS)
+            ->whereIn('role', ['institute', 'ngo'])
+            ->whereNotNull('email_verified_at')
+            ->whereIn('registration_fee_status', ['paid', 'not_required']);
     }
 
-    // ─── Show query ──────────────────────────────────────────────
+    // ─── Show ────────────────────────────────────────────────────
 
-    public function findForShow(int $id): ?Institute
+    public function findForShow(int $id): ?User
     {
-        return Institute::query()
-            ->forPublicListing()
-            ->with([
-                ...self::SHOW_RELATIONS,
-                'childBranches' => fn ($q) => $q->where('is_active_branch', true)
-                    ->select('id', 'parent_institute_id', 'institute_name', 'branch_name', 'branch_address', 'branch_city', 'branch_state', 'branch_phone', 'branch_email'),
-                'teachers' => fn ($q) => $q->where('verification_status', 'verified')
-                    ->with('user:id,name')
-                    ->limit(10),
-                'reviews' => fn ($q) => $q->where('status', 'published')
-                    ->latest()
-                    ->limit(5),
-            ])
-            ->withCount(self::SHOW_COUNTS)
+        return User::with(self::SHOW_RELATIONS)
+            ->whereIn('role', ['institute', 'ngo'])
+            ->whereNotNull('email_verified_at')
+            ->whereIn('registration_fee_status', ['paid', 'not_required'])
             ->where('id', $id)
             ->first();
     }
 
-    // ─── Fallback (empty filter results) ─────────────────────────
+    public function findForShowBySlug(string $slug): ?User
+    {
+        return User::with(self::SHOW_RELATIONS)
+            ->whereIn('role', ['institute', 'ngo'])
+            ->whereNotNull('email_verified_at')
+            ->whereIn('registration_fee_status', ['paid', 'not_required'])
+            ->whereHas('profile', fn ($q) => $q->where('slug', $slug))
+            ->first();
+    }
+
+    // ─── Fallback ────────────────────────────────────────────────
 
     public function getFeaturedFallback(array $excludeIds, int $limit): \Illuminate\Support\Collection
     {
         return $this->baseListQuery()
-            ->whereNotIn('id', $excludeIds ?: [0])
-            ->orderByDesc('is_featured')
-            ->orderByDesc('rating')
+            ->whereNotIn('users.id', $excludeIds ?: [0])
+            ->orderByDesc('users.created_at')
             ->limit($limit)
             ->get();
     }
 
-    // ─── Related institutes (cached) ─────────────────────────────
+    // ─── Related (cached) ────────────────────────────────────────
 
-    public function getRelatedInstitutes(Institute $institute, int $limit = 6): array
+    public function getRelatedInstitutes(User $user, int $limit = 4): array
     {
         return Cache::remember(
-            "institute_related:{$institute->id}",
+            "institute_related:{$user->id}",
             self::RELATED_CACHE_TTL,
-            fn () => $this->queryRelatedInstitutes($institute, $limit)->all()
+            fn () => $this->queryRelatedInstitutes($user, $limit)->all()
         );
+    }
+
+    // ─── Cities for filters ──────────────────────────────────────
+
+    public function getInstituteCities(int $limit = 50): array
+    {
+        return Cache::remember('institute_cities_profile', 3600, function () use ($limit) {
+            return User::whereIn('role', ['institute', 'ngo'])
+                ->whereNotNull('email_verified_at')
+                ->whereIn('registration_fee_status', ['paid', 'not_required'])
+                ->join('profiles', 'users.id', '=', 'profiles.user_id')
+                ->where('profiles.is_active', true)
+                ->whereNotNull('profiles.city')
+                ->where('profiles.city', '!=', '')
+                ->select('profiles.city as value', DB::raw('count(*) as count'))
+                ->groupBy('profiles.city')
+                ->orderByDesc('count')
+                ->orderBy('profiles.city')
+                ->limit($limit)
+                ->get()
+                ->map(fn ($r) => ['value' => $r->value, 'count' => (int) $r->count])
+                ->all();
+        });
     }
 
     // ─── Filters ─────────────────────────────────────────────────
@@ -111,8 +138,7 @@ class PublicInstituteService
     {
         $this->applySearchFilter($query, $request);
         $this->applyLocationFilters($query, $request);
-        $this->applyProfileInfoFilters($query, $request);
-        $this->applySubjectFilter($query, $request);
+        $this->applyInstituteInfoFilters($query, $request);
         $this->applyBooleanFilters($query, $request);
     }
 
@@ -123,77 +149,65 @@ class PublicInstituteService
             return;
         }
 
-        $query->where(fn ($q) => $q
-            ->where('institute_name', 'like', "%{$search}%")
-            ->orWhere('branch_name', 'like', "%{$search}%")
-            ->orWhere('description', 'like', "%{$search}%")
-            ->orWhere('specialization', 'like', "%{$search}%")
-            ->orWhere('affiliation', 'like', "%{$search}%"));
+        $query->where(function ($q) use ($search) {
+            $q->where('users.name', 'like', "%{$search}%")
+                ->orWhereHas('profile', fn ($pq) => $pq
+                    ->where('display_name', 'like', "%{$search}%")
+                    ->orWhere('bio', 'like', "%{$search}%"))
+                ->orWhereHas('profile.instituteInfo', fn ($iq) => $iq
+                    ->where('institute_name', 'like', "%{$search}%")
+                    ->orWhere('institute_description', 'like', "%{$search}%"));
+        });
     }
 
     private function applyLocationFilters(Builder $query, Request $request): void
     {
         if ($request->filled('location')) {
             $loc = $request->get('location');
-            $query->where(fn ($q) => $q
+            $query->whereHas('profile', fn ($q) => $q
                 ->where('city', 'like', "%{$loc}%")
-                ->orWhere('branch_city', 'like', "%{$loc}%")
-                ->orWhere('state', 'like', "%{$loc}%")
-                ->orWhere('address', 'like', "%{$loc}%"));
+                ->orWhere('area', 'like', "%{$loc}%")
+                ->orWhere('state', 'like', "%{$loc}%"));
             return;
         }
 
         if ($request->filled('city')) {
-            $city = $request->get('city');
-            $query->where(fn ($q) => $q
-                ->where('city', 'like', "%{$city}%")
-                ->orWhere('branch_city', 'like', "%{$city}%"));
+            $query->whereHas('profile', fn ($q) => $q->where('city', 'like', "%{$request->get('city')}%"));
+        }
+
+        if ($request->filled('area') && !$request->filled('city')) {
+            $query->whereHas('profile', fn ($q) => $q->where('area', 'like', "%{$request->get('area')}%"));
         }
 
         if ($request->filled('state')) {
-            $state = $request->get('state');
-            $query->where(fn ($q) => $q
-                ->where('state', 'like', "%{$state}%")
-                ->orWhere('branch_state', 'like', "%{$state}%"));
+            $query->whereHas('profile', fn ($q) => $q->where('state', 'like', "%{$request->get('state')}%"));
         }
 
         if ($request->filled('pincode')) {
-            $pin = $request->get('pincode');
-            $query->where(fn ($q) => $q
-                ->where('pincode', $pin)
-                ->orWhere('branch_pincode', $pin));
+            $query->whereHas('profile', fn ($q) => $q->where('pincode', $request->get('pincode')));
         }
     }
 
     /**
-     * Filters that map a request param to a ProfileInstituteInfo column via whereHas.
-     * Driven by PROFILE_INFO_FILTERS constant -- zero repetition.
+     * DRY: all profile_institute_info column filters driven by INSTITUTE_INFO_FILTERS map.
      */
-    private function applyProfileInfoFilters(Builder $query, Request $request): void
+    private function applyInstituteInfoFilters(Builder $query, Request $request): void
     {
-        foreach (self::PROFILE_INFO_FILTERS as $param => $column) {
+        foreach (self::INSTITUTE_INFO_FILTERS as $param => $column) {
             if ($request->filled($param)) {
                 $value = $request->get($param);
-                $query->whereHas('user.profile.instituteInfo', fn ($q) => $q->where($column, $value));
+                $query->whereHas('profile.instituteInfo', fn ($q) => $q->where($column, $value));
             }
-        }
-    }
-
-    private function applySubjectFilter(Builder $query, Request $request): void
-    {
-        $subjectId = $request->query('subject_id') ?? $request->query('subject');
-        if ($subjectId) {
-            $query->whereHas('subjects', fn ($q) => $q->where('subjects.id', $subjectId));
         }
     }
 
     private function applyBooleanFilters(Builder $query, Request $request): void
     {
         if ($request->boolean('verified', false)) {
-            $query->where('verified', true);
+            $query->whereHas('profile', fn ($q) => $q->where('is_verified', true));
         }
         if ($request->boolean('featured')) {
-            $query->where('is_featured', true);
+            $query->whereHas('profile', fn ($q) => $q->where('is_featured', true));
         }
     }
 
@@ -201,48 +215,49 @@ class PublicInstituteService
 
     private function applySorting(Builder $query, Request $request): void
     {
-        $sortBy = $request->query('sort', 'default');
-        $order  = in_array(strtolower((string) $request->query('order', 'desc')), ['asc', 'desc'])
-            ? strtolower($request->query('order', 'desc'))
-            : 'desc';
+        $orderBy = $request->query('order_by') ?? $request->query('sort', 'recent');
 
-        if ($sortBy === 'recent') {
-            $query->orderByDesc('created_at');
+        if ($orderBy === 'recent' || $orderBy === 'default') {
+            $query->orderByDesc('users.created_at');
             return;
         }
 
-        if (isset(self::SORT_COLUMNS[$sortBy])) {
-            $query->orderBy(self::SORT_COLUMNS[$sortBy], $order);
+        if (isset(self::SORT_MAP[$orderBy])) {
+            $map = self::SORT_MAP[$orderBy];
+            $subquery = "(SELECT {$map['table']}.{$map['column']} FROM profiles "
+                . "LEFT JOIN {$map['table']} ON profiles.id = {$map['table']}.profile_id "
+                . "WHERE profiles.user_id = users.id LIMIT 1)";
+            $query->orderByRaw("{$subquery} {$map['direction']}");
             return;
         }
 
-        $query->orderByDesc('is_featured')
-            ->orderByDesc('rating')
-            ->orderByDesc('teachers_count');
+        $query->orderByDesc('users.created_at');
     }
 
-    // ─── Related query (private) ─────────────────────────────────
+    // ─── Related (private) ───────────────────────────────────────
 
-    private function queryRelatedInstitutes(Institute $institute, int $limit): \Illuminate\Support\Collection
+    private function queryRelatedInstitutes(User $user, int $limit): \Illuminate\Support\Collection
     {
-        $info = $institute->user?->profile?->instituteInfo;
+        $profile = $user->profile;
+        $info = $profile?->instituteInfo;
 
         return $this->baseListQuery()
-            ->where('id', '!=', $institute->id)
-            ->where(function ($q) use ($institute, $info) {
-                $city = $institute->city ?? $institute->branch_city;
-                if ($city) {
-                    $q->where('city', $city)->orWhere('branch_city', $city);
-                }
-                if ($info?->institute_type_id) {
-                    $q->orWhereHas('user.profile.instituteInfo', fn ($iq) => $iq->where('institute_type_id', $info->institute_type_id));
-                }
-                if ($info?->institute_category_id) {
-                    $q->orWhereHas('user.profile.instituteInfo', fn ($iq) => $iq->where('institute_category_id', $info->institute_category_id));
-                }
+            ->where('users.id', '!=', $user->id)
+            ->whereHas('profile', function ($q) use ($profile, $info) {
+                $q->where('is_active', true)
+                    ->where(function ($sub) use ($profile, $info) {
+                        if ($profile?->city) {
+                            $sub->where('city', $profile->city);
+                        }
+                        if ($info?->institute_type_id) {
+                            $sub->orWhereHas('instituteInfo', fn ($iq) => $iq->where('institute_type_id', $info->institute_type_id));
+                        }
+                        if ($info?->institute_category_id) {
+                            $sub->orWhereHas('instituteInfo', fn ($iq) => $iq->where('institute_category_id', $info->institute_category_id));
+                        }
+                    });
             })
-            ->orderByDesc('is_featured')
-            ->orderByDesc('rating')
+            ->orderByDesc('users.created_at')
             ->limit($limit)
             ->get();
     }

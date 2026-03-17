@@ -3,189 +3,161 @@
 namespace App\Services\PublicProfile;
 
 use App\Helpers\PublicProfileOptionsMapper;
-use App\Models\Institute;
+use App\Models\User;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
 class PublicInstituteFormatter
 {
     /**
-     * Format institute for list view.
+     * Format institute user for list view.
      */
-    public function listItem(Institute $institute): array
+    public function listItem(User $user): array
     {
+        $profile = $user->profile;
+        $info = $profile?->instituteInfo;
+
         return [
-            'id'             => $institute->id,
-            'name'           => $institute->display_name,
-            'slug'           => $institute->slug,
-            'description'    => Str::limit($institute->description ?? $institute->specialization ?? '', 150),
-            'logo_url'       => $this->storageUrl($institute->logo),
-            'city'           => $institute->city ?? $institute->branch_city,
-            'state'          => $institute->state ?? $institute->branch_state,
-            'rating'         => (float) ($institute->rating ?? 0),
-            'teachers_count' => $institute->teachers_count ?? $institute->teachers()->count(),
-            'subjects'       => $this->safeRelation($institute, 'subjects')
-                ->map(fn ($s) => ['id' => $s->id, 'name' => $s->name, 'slug' => $s->slug])
-                ->take(5)
-                ->all(),
-            'verified'       => (bool) $institute->verified,
-            'is_featured'    => (bool) $institute->is_featured,
+            'id'             => $user->id,
+            'name'           => $info?->institute_name ?? $profile?->display_name ?? $user->name,
+            'slug'           => $profile?->slug,
+            'description'    => Str::limit($info?->institute_description ?? $profile?->bio ?? '', 150),
+            'logo_url'       => $this->storageUrl($profile?->profile_image),
+            'city'           => $profile?->city,
+            'state'          => $profile?->state,
+            'institute_type' => $info?->institute_type_name,
+            'verified'       => (bool) ($profile?->is_verified ?? false),
+            'is_featured'    => (bool) ($profile?->is_featured ?? false),
         ];
     }
 
     /**
-     * Format institute for show/detail view.
+     * Format institute user for show/detail view.
      */
-    public function show(Institute $institute): array
+    public function show(User $user): array
     {
-        $info    = $institute->user?->profile?->instituteInfo;
-        $options = PublicProfileOptionsMapper::mapInstituteOptions($institute, $info);
+        $profile = $user->profile;
+        $info = $profile?->instituteInfo;
+        $options = PublicProfileOptionsMapper::mapInstituteOptions((object) [], $info);
 
         return [
-            'id'               => $institute->id,
-            'slug'             => $institute->slug,
-            'user'             => $this->formatUser($institute),
-            'profile'          => $this->formatProfile($institute, $options),
-            'social'           => $this->formatSocialLinks($institute->user?->profile?->socialLinks),
-            'rating'           => (float) ($institute->rating ?? 0),
-            'counts'           => $this->formatCounts($institute),
-            'subjects'         => $this->safeRelation($institute, 'subjects')
-                ->map(fn ($s) => ['id' => $s->id, 'name' => $s->name, 'slug' => $s->slug, 'category' => $s->category])
-                ->all(),
-            'exams'            => $this->safeRelation($institute, 'exams')
-                ->map(fn ($e) => ['id' => $e->id, 'name' => $e->name, 'slug' => $e->slug])
-                ->all(),
-            'branches'         => $this->formatBranches($institute),
-            'teachers_preview' => $this->formatTeachersPreview($institute),
-            'reviews'          => $this->formatReviews($institute),
-            'verified'         => (bool) $institute->verified,
-            'is_featured'      => (bool) $institute->is_featured,
+            'id'      => $user->id,
+            'slug'    => $profile?->slug,
+            'user'    => $this->formatUser($user),
+            'profile' => $this->formatProfile($profile, $info, $options),
+            'social'  => $this->formatSocialLinks($profile),
+            'counts'  => $this->formatCounts($info),
+            'verified'    => (bool) ($profile?->is_verified ?? false),
+            'is_featured' => (bool) ($profile?->is_featured ?? false),
         ];
     }
 
-    // ─── Private helpers (DRY) ───────────────────────────────────
+    // ─── Private helpers ─────────────────────────────────────────
 
-    private function formatUser(Institute $institute): array
+    private function formatUser(User $user): array
     {
         return [
-            'id'    => $institute->user?->id,
-            'name'  => $institute->user?->name,
-            'email' => $institute->user?->email,
+            'id'    => $user->id,
+            'name'  => $user->name,
+            'email' => $user->email,
+            'role'  => $user->role,
         ];
     }
 
-    private function formatProfile(Institute $institute, array $options): array
+    private function formatProfile($profile, $info, array $options): array
     {
         return [
-            'name'                 => $institute->display_name,
-            'description'          => $institute->description,
-            'specialization'       => $institute->specialization,
-            'affiliation'          => $institute->affiliation,
-            'registration_number'  => $institute->registration_number,
-            'website'              => $institute->website,
-            'contact_person'       => $institute->contact_person,
-            'contact_phone'        => $institute->contact_phone,
-            'contact_email'        => $institute->contact_email,
-            'address'              => $institute->address ?? $institute->branch_address,
-            'city'                 => $institute->city ?? $institute->branch_city,
-            'state'                => $institute->state ?? $institute->branch_state,
-            'pincode'              => $institute->pincode ?? $institute->branch_pincode,
-            'latitude'             => $institute->latitude ? (float) $institute->latitude : null,
-            'longitude'            => $institute->longitude ? (float) $institute->longitude : null,
-            'established_year'     => $institute->established_year,
+            'name'                 => $info?->institute_name ?? $profile?->display_name,
+            'description'          => $info?->institute_description ?? $profile?->bio,
+            'specializations'      => $info?->specializations ?? [],
+            'courses_offered'      => $info?->courses_offered ?? [],
+            'affiliation_number'   => $info?->affiliation_number,
+            'registration_number'  => $info?->registration_number,
+            'udise_code'           => $info?->udise_code,
+            'aicte_code'           => $info?->aicte_code,
+            'ugc_code'             => $info?->ugc_code,
+            'website'              => $profile?->website,
+            'principal_name'       => $info?->principal_name,
+            'principal_phone'      => $info?->principal_phone,
+            'principal_email'      => $info?->principal_email,
+            'phone_primary'        => $profile?->phone_primary,
+            'whatsapp'             => $profile?->whatsapp,
+            'address'              => $this->formatAddress($profile),
+            'city'                 => $profile?->city,
+            'state'                => $profile?->state,
+            'area'                 => $profile?->area,
+            'pincode'              => $profile?->pincode,
+            'latitude'             => $profile?->latitude ? (float) $profile->latitude : null,
+            'longitude'            => $profile?->longitude ? (float) $profile->longitude : null,
             'institute_type'       => $options['institute_type'],
             'institute_category'   => $options['institute_category'],
             'establishment_year'   => $options['establishment_year'],
-            'total_students'       => $institute->total_students,
             'total_students_range' => $options['total_students'],
             'total_teachers_range' => $options['total_teachers'],
-            'logo_url'             => $this->storageUrl($institute->logo),
-            'gallery_urls'         => $this->galleryUrls($institute->gallery_images),
-            'facilities'           => $institute->facilities ?? [],
+            'facilities'           => $info?->facilities ?? [],
+            'accreditations'       => $info?->accreditations ?? [],
+            'affiliations'         => $info?->affiliations ?? [],
+            'logo_url'             => $this->storageUrl($profile?->profile_image),
+            'cover_url'            => $this->storageUrl($profile?->cover_image),
+            'gallery_urls'         => $this->galleryUrls($profile?->gallery_images),
         ];
     }
 
-    private function formatCounts(Institute $institute): array
+    private function formatCounts($info): array
     {
         return [
-            'teachers' => $institute->teachers_count ?? $institute->teachers()->count(),
-            'branches' => $institute->child_branches_count ?? $institute->childBranches()->count(),
-            'subjects' => $institute->subjects_count ?? $institute->subjects()->count(),
+            'total_students' => $info?->total_students_name,
+            'total_teachers' => $info?->total_teachers_name,
+            'total_branches' => $info?->total_branches,
         ];
     }
 
-    private function formatBranches(Institute $institute): array
+    private function formatSocialLinks($profile): ?array
     {
-        return $this->safeRelation($institute, 'childBranches')
-            ->map(fn ($b) => [
-                'id'      => $b->id,
-                'name'    => $b->branch_name ?: $b->institute_name,
-                'address' => $b->branch_address,
-                'city'    => $b->branch_city,
-                'state'   => $b->branch_state,
-                'phone'   => $b->branch_phone,
-                'email'   => $b->branch_email,
-            ])->all();
-    }
-
-    private function formatTeachersPreview(Institute $institute): array
-    {
-        return $this->safeRelation($institute, 'teachers')
-            ->map(fn ($t) => [
-                'id'   => $t->id,
-                'name' => $t->user?->name ?? 'Teacher',
-            ])->all();
-    }
-
-    private function formatReviews(Institute $institute): array
-    {
-        return $this->safeRelation($institute, 'reviews')
-            ->map(fn ($r) => [
-                'id'            => $r->id,
-                'rating'        => $r->rating,
-                'comment'       => $r->comment,
-                'reviewer_name' => $r->reviewer_name ?? $r->user?->name ?? 'Anonymous',
-                'created_at'    => $r->created_at?->toIso8601String(),
-            ])->all();
-    }
-
-    private function formatSocialLinks($socialLinks): ?array
-    {
-        if (!$socialLinks || ($socialLinks instanceof Collection && $socialLinks->isEmpty())) {
+        if (!$profile) {
             return null;
         }
 
-        $link = $socialLinks instanceof Collection ? $socialLinks->first() : $socialLinks;
-        if (!$link) {
-            return null;
+        $socialLinks = $profile->relationLoaded('socialLinks') ? $profile->socialLinks : null;
+
+        if ($socialLinks && $socialLinks instanceof Collection && $socialLinks->isNotEmpty()) {
+            $link = $socialLinks->first();
+            $fields = [
+                'facebook_url', 'twitter_url', 'instagram_url', 'linkedin_url',
+                'youtube_url', 'tiktok_url', 'telegram_username', 'discord_username',
+                'github_url', 'portfolio_url', 'blog_url', 'website_url',
+            ];
+            $data = collect($fields)
+                ->mapWithKeys(fn ($f) => [$f => $link->{$f} ?? null])
+                ->filter()
+                ->all();
+            if (!empty($data)) {
+                return $data;
+            }
         }
 
-        $fields = [
-            'facebook_url', 'twitter_url', 'instagram_url', 'linkedin_url',
-            'youtube_url', 'tiktok_url', 'telegram_username', 'discord_username',
-            'github_url', 'portfolio_url', 'blog_url', 'website_url',
-        ];
+        $inline = $profile->social_media_links ?? [];
+        return !empty($inline) ? $inline : null;
+    }
 
-        $data = collect($fields)
-            ->mapWithKeys(fn ($f) => [$f => $link->{$f} ?? null])
-            ->filter()
-            ->all();
-
-        return $data ?: null;
+    private function formatAddress($profile): ?string
+    {
+        if (!$profile) {
+            return null;
+        }
+        $parts = array_filter([
+            $profile->address_line_1,
+            $profile->address_line_2,
+            $profile->area,
+        ]);
+        return $parts ? implode(', ', $parts) : null;
     }
 
     // ─── Shared utilities ────────────────────────────────────────
 
-    private function safeRelation(Institute $institute, string $relation): Collection
-    {
-        return $institute->relationLoaded($relation)
-            ? $institute->getRelation($relation) ?? collect()
-            : collect();
-    }
-
     private function storageUrl(?string $path): ?string
     {
-        return $path ? storage_file_url($path) : null;
+        return ($path && trim($path) !== '') ? storage_file_url($path) : null;
     }
 
     private function galleryUrls(mixed $images): array
@@ -193,7 +165,6 @@ class PublicInstituteFormatter
         if (empty($images) || !is_array($images)) {
             return [];
         }
-
         return collect($images)
             ->filter(fn ($img) => is_string($img) && $img !== '')
             ->map(fn ($img) => storage_file_url($img))

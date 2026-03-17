@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Helpers\FilterOptionsHelper;
-use App\Models\Institute;
+use App\Models\User;
 use App\Services\PublicProfile\PublicInstituteFormatter;
 use App\Services\PublicProfile\PublicInstituteService;
 use Illuminate\Http\JsonResponse;
@@ -29,7 +29,7 @@ class PublicInstituteController extends BaseApiController
         return $this->success('Institute filter options retrieved successfully.', [
             'options'  => FilterOptionsHelper::buildFromConfig($optionKeys),
             'subjects' => FilterOptionsHelper::getActiveSubjects(),
-            'cities'   => FilterOptionsHelper::getInstituteCities(),
+            'cities'   => $this->service->getInstituteCities(),
         ]);
     }
 
@@ -39,9 +39,9 @@ class PublicInstituteController extends BaseApiController
     public function index(Request $request): JsonResponse
     {
         $query   = $this->service->listQuery($request);
-        $perPage = min(max(1, (int) $request->query('per_page', 15)), 50);
+        $perPage = min(max(1, (int) $request->query('per_page', 12)), 50);
 
-        $paginator = $query->paginate($perPage)->withQueryString();
+        $paginator  = $query->paginate($perPage)->withQueryString();
         $institutes = collect($paginator->items());
         $usedFallback = false;
 
@@ -53,7 +53,7 @@ class PublicInstituteController extends BaseApiController
             $usedFallback = true;
         }
 
-        $items = $institutes->map(fn (Institute $i) => $this->formatter->listItem($i));
+        $items = $institutes->map(fn (User $u) => $this->formatter->listItem($u));
 
         $pagination = $usedFallback
             ? FilterOptionsHelper::fallbackPaginationMeta($request, $perPage, $institutes->count())
@@ -70,18 +70,18 @@ class PublicInstituteController extends BaseApiController
      */
     public function show(int $id): JsonResponse
     {
-        $institute = $this->service->findForShow($id);
+        $user = $this->service->findForShow($id);
 
-        if (!$institute) {
+        if (!$user || !$user->profile) {
             return $this->notFound('Institute not found.');
         }
 
-        $related = collect($this->service->getRelatedInstitutes($institute))
-            ->map(fn (Institute $i) => $this->formatter->listItem($i))
+        $related = collect($this->service->getRelatedInstitutes($user))
+            ->map(fn (User $u) => $this->formatter->listItem($u))
             ->all();
 
         return $this->success('Institute profile retrieved successfully.', [
-            ...$this->formatter->show($institute),
+            ...$this->formatter->show($user),
             'related_institutes' => $related,
         ]);
     }
