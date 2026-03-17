@@ -85,4 +85,7 @@ class PublicInstituteController extends BaseApiController
             'related_institutes' => $related,
         ]);
     }
+
+    
+  
 }

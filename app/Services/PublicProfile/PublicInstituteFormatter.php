@@ -64,6 +64,7 @@ class PublicInstituteFormatter
             'slug'    => $profile?->slug,
             'user'    => $this->formatUser($user),
             'profile' => $this->formatProfile($profile, $info, $options),
+            'portfolio'=> $this->formatPortfolio($user->portfolio) ?? [],
             'social'  => $this->formatSocialLinks($profile),
             'counts'  => $this->formatCounts($info),
             'verified'    => (bool) ($profile?->is_verified ?? false),
@@ -189,5 +190,48 @@ class PublicInstituteFormatter
             ->map(fn ($img) => storage_file_url($img))
             ->values()
             ->all();
+    }
+
+
+      /**
+     * Format portfolio for public display. Returns null if no portfolio or status is not published.
+     */
+    private function formatPortfolio($portfolio): ?array
+    {
+        if (!$portfolio || $portfolio->status !== 'published') {
+            return null;
+        }
+
+        return [
+            'id' => $portfolio->id,
+            'title' => $portfolio->title,
+            'description' => $portfolio->description,
+            'images' => $this->formatPortfolioImages($portfolio->images ?? []),
+            'files' => $this->formatPortfolioFiles($portfolio->files ?? []),
+            'category' => $portfolio->category,
+            'categories_array' => $portfolio->categories_array ?? [],
+            'tags' => $portfolio->tags,
+            'tags_array' => $portfolio->tags_array ?? [],
+            'url' => $portfolio->url,
+            'is_featured' => (bool) $portfolio->is_featured,
+            'order' => (int) ($portfolio->order ?? 0),
+        ];
+    }
+
+    private function formatPortfolioImages(array $images): array
+    {
+        return array_map(fn (string $path) => [
+            'path' => $path,
+            'url' => storage_file_url($path),
+        ], $images);
+    }
+
+    private function formatPortfolioFiles(array $files): array
+    {
+        return array_map(fn (string $path) => [
+            'path' => $path,
+            'url' => storage_file_url($path),
+            'name' => basename($path),
+        ], $files);
     }
 }
