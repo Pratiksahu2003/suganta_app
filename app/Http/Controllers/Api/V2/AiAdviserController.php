@@ -6,7 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Ai\AiConversation;
 use App\Models\Ai\AiMessage;
 use App\Models\Ai\AiUserUsage;
-use App\Services\GeminiAiService;
+use App\Services\AiAdviserService;
 use App\Traits\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,7 +21,7 @@ class AiAdviserController extends Controller
     protected int $historyMessageMaxChars;
 
     public function __construct(
-        protected GeminiAiService $gemini,
+        protected AiAdviserService $ai,
     ) {
         $this->historyLimit = (int) config('gemini.history_limit', 10);
         $this->historyMessageMaxChars = (int) config('gemini.history_message_max_chars', 800);
@@ -88,7 +88,7 @@ class AiAdviserController extends Controller
         ];
 
         if ($role === 'assistant') {
-            $formatted['content_sections'] = $sections ?? $this->gemini->buildSections($message->content);
+            $formatted['content_sections'] = $sections ?? $this->ai->buildSections($message->content);
         }
 
         return $formatted;
@@ -170,7 +170,7 @@ class AiAdviserController extends Controller
             'role' => 'user',
         ]);
 
-        $result = $this->gemini->generateReply($validated['message']);
+        $result = $this->ai->generateReply($validated['message']);
 
         $totalTokens = 0;
         if (is_array($result['usage'] ?? null) && isset($result['usage']['totalTokenCount'])) {
@@ -249,7 +249,7 @@ class AiAdviserController extends Controller
             'role' => 'user',
         ]);
 
-        $result = $this->gemini->generateReply($validated['message'], $history);
+        $result = $this->ai->generateReply($validated['message'], $history);
 
         $totalTokens = 0;
         if (is_array($result['usage'] ?? null) && isset($result['usage']['totalTokenCount'])) {
