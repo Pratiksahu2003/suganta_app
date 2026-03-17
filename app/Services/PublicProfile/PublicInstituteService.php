@@ -13,7 +13,7 @@ class PublicInstituteService
     private const RELATED_CACHE_TTL = 300;
 
     private const LIST_RELATIONS = [
-        'profile:id,user_id,display_name,first_name,last_name,bio,city,state,area,pincode,profile_image,cover_image,gallery_images,slug,is_active,is_featured,is_verified,latitude,longitude,website,phone_primary,whatsapp',
+        'profile:id,user_id,display_name,first_name,last_name,bio,city,state,area,pincode,profile_image,slug,is_active,is_featured,is_verified,latitude,longitude,website,phone_primary,whatsapp',
         'profile.instituteInfo',
     ];
 
