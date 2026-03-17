@@ -17,7 +17,7 @@ class NoteResource extends JsonResource
         $user = $request->user();
         $isPurchased = $user ? $this->resource->isPurchasedBy($user->id) : false;
         $hasSubscriptionAccess = $user
-            ? app(\App\Services\SubscriptionService::class)->hasActiveSubscription($user, 1)
+            ? app(\App\Services\SubscriptionService::class)->hasActiveSubscription($user, 2)
             : false;
         $canAccess = $isPurchased || $hasSubscriptionAccess || !$this->resource->is_paid;
 
