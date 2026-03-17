@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources\V2;
 
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -19,11 +20,11 @@ class ReviewResource extends JsonResource
             'helpful_count' => $this->helpful_count,
             'status' => $this->status,
             'reply' => $this->reply,
-            'replied_at' => $this->replied_at?->toISOString(),
-            'reviewed_at' => $this->reviewed_at?->toISOString(),
-            'created_at' => $this->created_at?->toISOString(),
-            'updated_at' => $this->updated_at?->toISOString(),
-            'time_ago' => $this->created_at?->diffForHumans(),
+            'replied_at' => $this->formatDate($this->replied_at),
+            'reviewed_at' => $this->formatDate($this->reviewed_at),
+            'created_at' => $this->formatDate($this->created_at),
+            'updated_at' => $this->formatDate($this->updated_at),
+            'time_ago' => $this->created_at ? $this->formatTimeAgo($this->created_at) : null,
 
             'reviewer' => $this->whenLoaded('user', fn () => [
                 'id' => $this->user->id,
@@ -55,5 +56,41 @@ class ReviewResource extends JsonResource
             ?? $reviewable->title
             ?? $reviewable->display_name
             ?? null;
+    }
+
+    protected function formatDate(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if ($value instanceof \DateTimeInterface) {
+            return $value->format('c');
+        }
+        if (is_string($value)) {
+            try {
+                return Carbon::parse($value)->format('c');
+            } catch (\Throwable) {
+                return $value;
+            }
+        }
+        return null;
+    }
+
+    protected function formatTimeAgo(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if ($value instanceof \DateTimeInterface) {
+            return Carbon::instance($value)->diffForHumans();
+        }
+        if (is_string($value)) {
+            try {
+                return Carbon::parse($value)->diffForHumans();
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+        return null;
     }
 }

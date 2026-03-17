@@ -37,6 +37,7 @@ class Review extends Model
         'rating' => 'integer',
         'helpful_count' => 'integer',
         'reviewed_at' => 'datetime',
+        'replied_at' => 'datetime',
     ];
 
     protected $attributes = [
