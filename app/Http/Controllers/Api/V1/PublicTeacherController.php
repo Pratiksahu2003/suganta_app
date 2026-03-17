@@ -67,7 +67,7 @@ class PublicTeacherController extends BaseApiController
         $items = $teachers->map(fn (User $user) => $this->formatListItem($user));
 
         $pagination = $usedFallback
-            ? $this->buildFallbackPagination($request, $perPage, $teachers->count())
+            ? FilterOptionsHelper::fallbackPaginationMeta($request, $perPage, $teachers->count())
             : FilterOptionsHelper::paginationMeta($teachersPaginator);
 
         return $this->success('Teachers retrieved successfully.', [
@@ -118,27 +118,6 @@ class PublicTeacherController extends BaseApiController
             ->whereNotNull('email_verified_at')
             ->where('users.id', '!=', self::EXCLUDED_USER_ID)
             ->whereIn('registration_fee_status', ['paid', 'not_required']);
-    }
-
-    /**
-     * Build pagination meta when fallback teachers are used (no filter matches).
-     * Matches structure of FilterOptionsHelper::paginationMeta for frontend consistency.
-     */
-    private function buildFallbackPagination(Request $request, int $perPage, int $total): array
-    {
-        $baseUrl = $request->url() . '?' . http_build_query($request->except('page') + ['page' => 1]);
-        return [
-            'current_page' => 1,
-            'per_page' => $perPage,
-            'total' => $total,
-            'last_page' => 1,
-            'from' => $total > 0 ? 1 : null,
-            'to' => $total,
-            'first_page_url' => $baseUrl,
-            'last_page_url' => $baseUrl,
-            'next_page_url' => null,
-            'prev_page_url' => null,
-        ];
     }
 
     private function applyFilters($query, Request $request): void

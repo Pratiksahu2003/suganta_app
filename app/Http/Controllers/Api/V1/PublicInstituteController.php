@@ -5,13 +5,15 @@ namespace App\Http\Controllers\Api\V1;
 use App\Helpers\FilterOptionsHelper;
 use App\Models\Institute;
 use App\Services\PublicProfile\PublicInstituteFormatter;
+use App\Services\PublicProfile\PublicInstituteService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class PublicInstituteController extends BaseApiController
 {
     public function __construct(
-        private PublicInstituteFormatter $formatter
+        private PublicInstituteService $service,
+        private PublicInstituteFormatter $formatter,
     ) {}
 
     /**
@@ -23,12 +25,12 @@ class PublicInstituteController extends BaseApiController
             'institute_type', 'institute_category', 'establishment_year_range',
             'total_students_range', 'total_teachers_range',
         ];
-        $data = [
-            'options' => FilterOptionsHelper::buildFromConfig($optionKeys),
+
+        return $this->success('Institute filter options retrieved successfully.', [
+            'options'  => FilterOptionsHelper::buildFromConfig($optionKeys),
             'subjects' => FilterOptionsHelper::getActiveSubjects(),
-            'cities' => FilterOptionsHelper::getInstituteCities(),
-        ];
-        return $this->success('Institute filter options retrieved successfully.', $data);
+            'cities'   => FilterOptionsHelper::getInstituteCities(),
+        ]);
     }
 
     /**
@@ -36,23 +38,30 @@ class PublicInstituteController extends BaseApiController
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Institute::query()
-            ->forPublicListing()
-            ->with(['subjects:id,name,slug'])
-            ->withCount('teachers');
+        $query   = $this->service->listQuery($request);
+        $perPage = min(max(1, (int) $request->query('per_page', 15)), 50);
 
-        $this->applyFilters($query, $request);
+        $paginator = $query->paginate($perPage)->withQueryString();
+        $institutes = collect($paginator->items());
+        $usedFallback = false;
 
-        $perPage = min((int) $request->query('per_page', 15), 50);
-        $institutes = $query->orderByDesc('is_featured')
-            ->orderByDesc('rating')
-            ->orderByDesc('teachers_count')
-            ->paginate($perPage);
-        $items = $institutes->getCollection()->map(fn ($i) => $this->formatter->listItem($i));
+        if ($institutes->isEmpty()) {
+            $institutes = $this->service
+                ->getFeaturedFallback($paginator->pluck('id')->all(), $perPage)
+                ->unique('id')
+                ->values();
+            $usedFallback = true;
+        }
+
+        $items = $institutes->map(fn (Institute $i) => $this->formatter->listItem($i));
+
+        $pagination = $usedFallback
+            ? FilterOptionsHelper::fallbackPaginationMeta($request, $perPage, $institutes->count())
+            : FilterOptionsHelper::paginationMeta($paginator);
 
         return $this->success('Institutes retrieved successfully.', [
             'institutes' => $items,
-            'pagination' => FilterOptionsHelper::paginationMeta($institutes),
+            'pagination' => $pagination,
         ]);
     }
 
@@ -61,40 +70,19 @@ class PublicInstituteController extends BaseApiController
      */
     public function show(int $id): JsonResponse
     {
-        $institute = Institute::query()
-            ->forPublicListing()
-            ->with([
-                'user:id,name,email',
-                'user.profile.instituteInfo',
-                'subjects:id,name,slug,category',
-                'childBranches' => fn ($q) => $q->where('is_active_branch', true)
-                    ->select('id', 'parent_institute_id', 'institute_name', 'branch_name', 'branch_address', 'branch_city', 'branch_state', 'branch_phone', 'branch_email'),
-                'teachers' => fn ($q) => $q->where('verification_status', 'verified')->with('user:id,name')->limit(10),
-            ])
-            ->withCount('teachers')
-            ->where('id', $id)
-            ->first();
+        $institute = $this->service->findForShow($id);
 
         if (!$institute) {
             return $this->notFound('Institute not found.');
         }
 
-        return $this->success('Institute profile retrieved successfully.', $this->formatter->show($institute));
-    }
+        $related = collect($this->service->getRelatedInstitutes($institute))
+            ->map(fn (Institute $i) => $this->formatter->listItem($i))
+            ->all();
 
-    private function applyFilters($query, Request $request): void
-    {
-        if ($request->boolean('verified', false)) {
-            $query->where('verified', true);
-        }
-        if ($city = $request->query('city')) {
-            $query->where(fn ($q) => $q->where('city', 'like', "%{$city}%")->orWhere('branch_city', 'like', "%{$city}%"));
-        }
-        if ($search = trim((string) $request->query('search'))) {
-            $query->where(fn ($q) => $q->where('institute_name', 'like', "%{$search}%")->orWhere('branch_name', 'like', "%{$search}%"));
-        }
-        if ($request->boolean('featured')) {
-            $query->where('is_featured', true);
-        }
+        return $this->success('Institute profile retrieved successfully.', [
+            ...$this->formatter->show($institute),
+            'related_institutes' => $related,
+        ]);
     }
 }

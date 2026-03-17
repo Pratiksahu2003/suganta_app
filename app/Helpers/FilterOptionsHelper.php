@@ -6,6 +6,7 @@ use App\Models\Institute;
 use App\Models\Subject;
 use App\Models\TeacherProfile;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
@@ -108,6 +109,28 @@ class FilterOptionsHelper
             'last_page_url' => $paginator->url($paginator->lastPage()),
             'next_page_url' => $paginator->nextPageUrl(),
             'prev_page_url' => $paginator->previousPageUrl(),
+        ];
+    }
+
+    /**
+     * Pagination meta for fallback results (when filters return empty and we serve defaults).
+     * Matches paginationMeta() structure for frontend consistency.
+     */
+    public static function fallbackPaginationMeta(Request $request, int $perPage, int $total): array
+    {
+        $baseUrl = $request->url() . '?' . http_build_query($request->except('page') + ['page' => 1]);
+
+        return [
+            'current_page' => 1,
+            'per_page' => $perPage,
+            'total' => $total,
+            'last_page' => 1,
+            'from' => $total > 0 ? 1 : null,
+            'to' => $total > 0 ? $total : null,
+            'first_page_url' => $baseUrl,
+            'last_page_url' => $baseUrl,
+            'next_page_url' => null,
+            'prev_page_url' => null,
         ];
     }
 }

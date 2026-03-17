@@ -1,6 +1,6 @@
-## AI Adviser V2 API – Gemini 2.5 Flash‑Lite
+## AI Adviser V2 API – Gemini 2.5 Flash-Lite
 
-This document explains how the AI Adviser feature works, how it uses Gemini 2.5 Flash‑Lite, how token limits and subscriptions are enforced, and how to call the v2 API endpoints.
+This document explains how the AI Adviser feature works, how it uses Gemini 2.5 Flash-Lite, how token limits and subscriptions are enforced, and how to call the v2 API endpoints.
 
 ---
 
@@ -8,20 +8,21 @@ This document explains how the AI Adviser feature works, how it uses Gemini 2.5 
 
 - **Framework**: Laravel 12
 - **Versioned APIs**:
-  - `routes/api.php` → includes:
+  - `routes/api.php` includes:
     - `routes/api/v1.php` – all existing v1 routes
     - `routes/api/v2.php` – AI Adviser v2 routes
 - **AI Adviser sessions (conversation history + meta)**:
   - Stored in the **separate AI database** (`ai_mysql` connection) using dedicated AI tables:
-    - `ai_conversations` – per‑conversation meta and linkage
-    - `ai_messages` – per‑message meta, roles, and usage
-    - `ai_user_usages` – per‑user token usage counters
-- **(Optional) main messaging system**:
-  - The existing `conversations` and `messages` tables in the main DB can still be used for non‑AI chat features.
+    - `ai_conversations` – per-conversation meta and linkage
+    - `ai_messages` – per-message meta, roles, and usage
+    - `ai_user_usages` – per-user token usage counters
 - **Gemini integration**:
   - Service: `App\Services\GeminiAiService`
   - Model: `gemini-2.5-flash-lite` (configurable)
   - Endpoint: `https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent`
+- **Response formatting**:
+  - All AI responses are returned as both **clean plain text** (`content`) and **structured sections** (`content_sections`) for easy UI rendering.
+  - Markdown symbols (`*`, `**`, `#`, backticks, etc.) are stripped from `content`.
 
 ---
 
@@ -31,8 +32,6 @@ This document explains how the AI Adviser feature works, how it uses Gemini 2.5 
 
 The main DB is already configured via standard Laravel `DB_*` variables. It continues to store:
 
-- `conversations`
-- `messages`
 - `subscription_plans`
 - `user_subscriptions`
 - `users`, etc.
@@ -94,34 +93,34 @@ All AI meta and usage live in the **AI database** (`ai_mysql`).
 
 ### 3.1 `ai_conversations`
 
-- Migration: `2026_03_16_000000_create_ai_conversations_table.php`
 - Model: `App\Models\Ai\AiConversation`
-- Columns (key ones):
-  - `conversation_id` – foreign key reference to main DB `conversations.id`
+- Key columns:
+  - `user_id` – owner of the conversation
+  - `subject` – optional label
+  - `status` – `active`
   - `model` – e.g. `gemini-2.5-flash-lite`
   - `purpose` – `ai_adviser`
   - `settings` (JSON) – per-conversation settings (optional)
-  - `total_prompt_tokens`, `total_completion_tokens`, `total_tokens`
-  - `last_used_at`, `last_error_code`, `last_error_message`
+  - `last_used_at` – updated on every reply
 
 ### 3.2 `ai_messages`
 
-- Migration: `2026_03_16_000001_create_ai_messages_table.php`
 - Model: `App\Models\Ai\AiMessage`
-- Columns:
-  - `message_id` – foreign key reference to main DB `messages.id`
-  - `role` – `user` / `assistant` / `system`
+- Key columns:
+  - `ai_conversation_id` – foreign key to `ai_conversations.id`
+  - `user_id` – the sender (user or AI system user)
+  - `content` – the message text
+  - `role` – `user` / `assistant`
   - `prompt_tokens`, `completion_tokens`, `total_tokens`
   - `raw_request` (JSON, optional)
   - `raw_response` (JSON, optional)
 
 ### 3.3 `ai_user_usages`
 
-- Migration: `2026_03_16_000002_create_ai_user_usages_table.php`
 - Model: `App\Models\Ai\AiUserUsage`
 - Columns:
   - `user_id` – references main DB `users.id`
-  - `total_tokens` – cumulative tokens consumed by this user (free + paid)
+  - `total_tokens` – cumulative tokens consumed by this user
 
 ---
 
@@ -129,42 +128,21 @@ All AI meta and usage live in the **AI database** (`ai_mysql`).
 
 ### 4.1 AI Plans
 
-AI‑specific plans are stored in the existing `subscription_plans` table:
+AI-specific plans are stored in the existing `subscription_plans` table:
 
 - Model: `App\Models\SubscriptionPlan`
 - Seeder: `Database\Seeders\AiSubscriptionPlanSeeder`
 
-The seeder defines two example AI plans (`s_type = 2`):
+Example AI plans (`s_type = 2`):
 
-- **AI Basic** (`slug: ai-basic`)
-  - `features['ai_tokens'] = 200000`
-- **AI Pro** (`slug: ai-pro`)
-  - `features['ai_tokens'] = 500000`
-  - Marked as `is_popular = true`
-
-You can adjust `price`, `currency`, `ai_tokens` and add more plans (e.g. “AI Advance”) as needed by inserting/updating `subscription_plans` records with `s_type = 2`.
+- **AI Basic** (`slug: ai-basic`) – `features['ai_tokens'] = 200000`
+- **AI Pro** (`slug: ai-pro`) – `features['ai_tokens'] = 500000`
 
 ### 4.2 Token Usage Rules
 
-1. **Free tier**:
-   - Each user gets **`AI_FREE_TOKENS`** tokens (default **100k**) even without a paid AI plan.
-   - Usage is tracked in `ai_user_usages.total_tokens`.
-2. **Paid AI plans**:
-   - If a user has an active `user_subscriptions` record whose `plan.s_type = AI_SUBSCRIPTION_TYPE` (default `2`):
-     - The token limit is taken from `plan.features['ai_tokens']`.
-   - Example:
-     - Basic: `ai_tokens = 200000`
-     - Pro: `ai_tokens = 500000`
-3. **Enforcement**:
-   - Implemented in `App\Http\Controllers\Api\V2\AiAdviserController`:
-     - `getUserTokenLimit($user)`:
-       - If user has active AI subscription ⇒ use `plan.features['ai_tokens']`.
-       - Else ⇒ use configured free limit.
-     - `ensureWithinTokenLimit($user, int $newTokens)`:
-       - Uses `AiUserUsage` to check if `current + newTokens > limit`.
-       - If exceeded ⇒ returns `402` JSON error:
-         - `message`: “AI token limit exceeded. Please upgrade your AI subscription plan.”
-       - If allowed ⇒ increments `total_tokens` and continues.
+1. **Free tier**: Each user gets `AI_FREE_TOKENS` tokens (default 100,000) without a paid plan.
+2. **Paid AI plans**: If a user has an active subscription with `plan.s_type = AI_SUBSCRIPTION_TYPE`, the token limit is taken from `plan.features['ai_tokens']`.
+3. **Enforcement**: `ensureWithinTokenLimit()` checks `current + newTokens > limit`. If exceeded, returns a `402` error with usage details.
 
 ---
 
@@ -173,7 +151,6 @@ You can adjust `price`, `currency`, `ai_tokens` and add more plans (e.g. “AI A
 ### 5.1 Service Class
 
 - File: `app/Services/GeminiAiService.php`
-- Method:
 
 ```php
 public function generateReply(string $prompt, array $history = []): array
@@ -182,28 +159,44 @@ public function generateReply(string $prompt, array $history = []): array
 #### Parameters
 
 - `$prompt` – current user message.
-- `$history` – optional conversation history:
-  - Each item: `['role' => 'user'|'assistant', 'content' => '...']`
+- `$history` – optional conversation history. Each item: `['role' => 'user'|'assistant', 'content' => '...']`
 
 #### Behaviour
 
-- Builds the `contents` payload for Gemini:
-  - Includes prior history (user/assistant messages).
-  - Appends current user prompt as the last content.
-- Calls Gemini `generateContent` endpoint with:
-  - Model from `config('gemini.model_id')`
-  - API key from `config('gemini.api_key')`
-- Returns:
+- Maps `assistant` role to `model` (Gemini only accepts `user` / `model`).
+- Ensures conversation starts with `user` role (drops leading `model` entries).
+- Merges consecutive same-role messages (Gemini disallows them).
+- Calls Gemini `generateContent` endpoint.
+- Strips markdown from the response and parses it into structured sections.
+
+#### Return Value
 
 ```php
 [
-    'text'  => string,       // assistant reply text
-    'usage' => array|null,   // usageMetadata from Gemini, if provided
-    'raw'   => array,        // full API JSON response
+    'text'     => string,       // clean plain text (markdown stripped)
+    'sections' => array,        // structured content sections for UI
+    'usage'    => array|null,   // usageMetadata from Gemini
+    'raw'      => array,        // full Gemini API JSON response
 ]
 ```
 
-`usageMetadata` is used to update `ai_messages` and `ai_user_usages`.
+### 5.2 Response Formatting
+
+The service processes every AI response in two ways:
+
+1. **`stripMarkdown()`** – removes `*`, `**`, `#`, backticks, horizontal rules, blockquote markers, markdown links/images. Returns clean plain text.
+2. **`parseIntoSections()`** – parses the raw markdown into an array of structured section objects.
+
+### 5.3 Content Section Types
+
+Each section in the `content_sections` array has a `type` field and a corresponding data field:
+
+| Type        | Data Field | Description                          |
+|-------------|------------|--------------------------------------|
+| `heading`   | `heading`  | Section title (from `#` headings)    |
+| `paragraph` | `body`     | Normal text block                    |
+| `list`      | `items`    | Array of list item strings           |
+| `note`      | `body`     | Highlighted callout (from `>` quotes)|
 
 ---
 
@@ -222,6 +215,8 @@ All endpoints require:
 
 - `auth:sanctum` (Bearer token via Sanctum).
 
+---
+
 ### 6.1 Start a New AI Conversation
 
 - **Method**: `POST`
@@ -238,53 +233,94 @@ All endpoints require:
 ```
 
 - `message` (string, required): first user query.
-- `subject` (string, optional): label for the conversation.
-
-#### Behaviour
-
-- Creates a `conversations` row (main DB) with:
-  - `initiator_id = user.id`
-  - `participant_id = user.id` (AI responses are distinguished by sender id)
-  - `type = 'general'`
-  - `status = 'active'`
-- Creates `ai_conversations` row (AI DB) linked by `conversation_id`.
-- Creates user `messages` row + `ai_messages` meta row (`role = user`).
-- Calls Gemini with the prompt, enforces token limit.
-- Creates assistant `messages` row (sender = `AI_ADVISER_SYSTEM_USER_ID` or user id fallback) + `ai_messages` meta row (`role = assistant`).
+- `subject` (string, optional, max 255): label for the conversation.
 
 #### Success Response (200)
 
 ```json
 {
-  "message": "AI adviser response generated.",
+  "message": "AI adviser conversation started.",
   "success": true,
   "code": 200,
   "data": {
-    "conversation_id": 123,
-    "message": "Here is a suggested daily schedule for your JEE preparation..."
+    "conversation": {
+      "id": 42,
+      "subject": "JEE Study Plan",
+      "status": "active",
+      "started_at": "2026-03-16T10:30:00+00:00"
+    },
+    "messages": [
+      {
+        "id": 1,
+        "role": "user",
+        "content": "I am a student preparing for JEE. How should I plan my daily study schedule?",
+        "sent_at": "2026-03-16T10:30:00+00:00"
+      },
+      {
+        "id": 2,
+        "role": "assistant",
+        "content": "Here is a suggested daily schedule for your JEE preparation...",
+        "sent_at": "2026-03-16T10:30:01+00:00",
+        "content_sections": [
+          {
+            "type": "heading",
+            "heading": "Daily Study Plan for JEE"
+          },
+          {
+            "type": "paragraph",
+            "body": "A well-structured daily plan is crucial for JEE success. Here is a recommended breakdown."
+          },
+          {
+            "type": "list",
+            "items": [
+              "6:00 AM - 8:00 AM: Physics (problem solving and concepts)",
+              "9:00 AM - 11:00 AM: Mathematics (practice previous year papers)",
+              "2:00 PM - 4:00 PM: Chemistry (organic + inorganic revision)",
+              "7:00 PM - 8:00 PM: Review mistakes and short notes"
+            ]
+          },
+          {
+            "type": "note",
+            "body": "Consistency matters more than long hours. Take regular breaks to stay focused."
+          }
+        ]
+      }
+    ],
+    "token_usage": {
+      "tokens_used": 350,
+      "tokens_limit": 100000,
+      "tokens_remaining": 99650,
+      "usage_percentage": 0.35
+    }
   }
 }
 ```
 
-#### Error – Token Limit Exceeded (402)
+#### Response Fields
 
-```json
-{
-  "message": "AI token limit exceeded. Please upgrade your AI subscription plan.",
-  "success": false,
-  "code": 402
-}
-```
+| Field | Type | Description |
+|-------|------|-------------|
+| `data.conversation.id` | integer | Conversation ID (use for subsequent replies) |
+| `data.conversation.subject` | string/null | Conversation label |
+| `data.conversation.status` | string | Always `"active"` on creation |
+| `data.conversation.started_at` | string | ISO 8601 timestamp |
+| `data.messages` | array | Array of message objects (user + assistant) |
+| `data.messages[].id` | integer | Message ID |
+| `data.messages[].role` | string | `"user"` or `"assistant"` |
+| `data.messages[].content` | string | Clean plain text (no markdown symbols) |
+| `data.messages[].sent_at` | string | ISO 8601 timestamp |
+| `data.messages[].content_sections` | array | Structured sections (assistant messages only) |
+| `data.token_usage` | object | Current token usage snapshot |
 
 ---
 
-### 6.2 Send a Message in an Existing Conversation
+### 6.2 Send a Reply in an Existing Conversation
 
 - **Method**: `POST`
 - **URL**: `/api/v2/ai-adviser/conversations/{conversation}/message`
 - **Auth**: required
 
-`{conversation}` is the ID from `conversation_id` returned in the start call.
+`{conversation}` is the `conversation.id` from the start response.
 
 #### Request Body
 
@@ -294,48 +330,147 @@ All endpoints require:
 }
 ```
 
-#### Behaviour
-
-- Validates that the authenticated user is part of the conversation (`involvesUser` check).
-- Ensures an `ai_conversations` record exists (creates it if missing).
-- Loads previous messages and builds `history` for Gemini.
-- Creates new user `messages` + `ai_messages` (`role = user`).
-- Calls Gemini with history + current message, enforces token limit.
-- Creates assistant `messages` + `ai_messages` (`role = assistant`).
-- Updates `conversations.last_message_at` and `ai_conversations.last_used_at`.
+- `message` (string, required): the follow-up query.
 
 #### Success Response (200)
 
 ```json
 {
-  "message": "AI adviser response generated.",
+  "message": "AI adviser reply received.",
   "success": true,
   "code": 200,
   "data": {
-    "conversation_id": 123,
-    "message": "Given your school schedule from 8am to 2pm, here's an adjusted study plan..."
+    "conversation": {
+      "id": 42,
+      "subject": "JEE Study Plan",
+      "status": "active",
+      "total_messages": 4
+    },
+    "user_message": {
+      "id": 3,
+      "role": "user",
+      "content": "Can you adjust the plan for someone who also has school from 8am to 2pm?",
+      "sent_at": "2026-03-16T10:35:00+00:00"
+    },
+    "assistant_message": {
+      "id": 4,
+      "role": "assistant",
+      "content": "Given your school schedule from 8am to 2pm, here is an adjusted study plan...",
+      "sent_at": "2026-03-16T10:35:01+00:00",
+      "content_sections": [
+        {
+          "type": "heading",
+          "heading": "Adjusted Study Plan (School 8 AM - 2 PM)"
+        },
+        {
+          "type": "paragraph",
+          "body": "Since you have school from 8 AM to 2 PM, your study sessions need to be concentrated in the early morning and evening."
+        },
+        {
+          "type": "list",
+          "items": [
+            "5:30 AM - 7:30 AM: Physics (concepts and numerical practice)",
+            "3:00 PM - 5:00 PM: Mathematics (focus on problem solving)",
+            "6:00 PM - 7:30 PM: Chemistry (revision and formulas)",
+            "8:30 PM - 9:30 PM: Review the day and solve mock questions"
+          ]
+        },
+        {
+          "type": "note",
+          "body": "Use your school breaks for quick revision of formulas and short notes."
+        }
+      ]
+    },
+    "token_usage": {
+      "tokens_used": 720,
+      "tokens_limit": 100000,
+      "tokens_remaining": 99280,
+      "usage_percentage": 0.72
+    }
   }
 }
 ```
 
+#### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `data.conversation.id` | integer | Conversation ID |
+| `data.conversation.subject` | string/null | Conversation label |
+| `data.conversation.status` | string | Conversation status |
+| `data.conversation.total_messages` | integer | Total messages in conversation |
+| `data.user_message` | object | The user's message just sent |
+| `data.assistant_message` | object | The AI's reply |
+| `data.assistant_message.content_sections` | array | Structured sections for UI rendering |
+| `data.token_usage` | object | Updated token usage snapshot |
+
 ---
 
-### 6.3 List User’s AI Conversations
+### 6.3 List User's AI Conversations
 
 - **Method**: `GET`
 - **URL**: `/api/v2/ai-adviser/conversations`
 - **Auth**: required
 
-#### Behaviour
-
-- Fetches `conversations` where:
-  - `initiator_id = auth()->id()`
-  - There is a related `ai_conversations` record with `purpose = 'ai_adviser'`.
-- Paginates results (`15` per page).
+Returns a paginated list of the user's AI adviser conversations, ordered by most recently active.
 
 #### Success Response (200)
 
-Standard paginated response from `ApiResponse::paginated`, containing conversation list with meta and links.
+```json
+{
+  "message": "AI adviser conversations fetched.",
+  "success": true,
+  "code": 200,
+  "data": {
+    "conversations": [
+      {
+        "id": 42,
+        "subject": "JEE Study Plan",
+        "status": "active",
+        "total_messages": 4,
+        "last_message_preview": "Given your school schedule from 8am to 2pm, here is an adjusted study plan that fits around yo...",
+        "started_at": "2026-03-16T10:30:00+00:00",
+        "last_active_at": "2026-03-16T10:35:01+00:00"
+      },
+      {
+        "id": 38,
+        "subject": null,
+        "status": "active",
+        "total_messages": 2,
+        "last_message_preview": "To improve your English speaking skills, you should practice daily conversation with a partner o...",
+        "started_at": "2026-03-15T14:00:00+00:00",
+        "last_active_at": "2026-03-15T14:00:05+00:00"
+      }
+    ],
+    "pagination": {
+      "current_page": 1,
+      "per_page": 15,
+      "total": 2,
+      "last_page": 1,
+      "has_more": false
+    }
+  }
+}
+```
+
+#### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `data.conversations` | array | List of conversation summary objects |
+| `data.conversations[].id` | integer | Conversation ID |
+| `data.conversations[].subject` | string/null | Conversation label |
+| `data.conversations[].status` | string | Conversation status |
+| `data.conversations[].total_messages` | integer | Total messages in the conversation |
+| `data.conversations[].last_message_preview` | string/null | Truncated preview of the last message (120 chars) |
+| `data.conversations[].started_at` | string | ISO 8601 timestamp of creation |
+| `data.conversations[].last_active_at` | string | ISO 8601 timestamp of last activity |
+| `data.pagination` | object | Pagination metadata |
+| `data.pagination.current_page` | integer | Current page number |
+| `data.pagination.per_page` | integer | Items per page (15) |
+| `data.pagination.total` | integer | Total number of conversations |
+| `data.pagination.last_page` | integer | Last page number |
+| `data.pagination.has_more` | boolean | Whether more pages exist |
 
 ---
 
@@ -345,50 +480,248 @@ Standard paginated response from `ApiResponse::paginated`, containing conversati
 - **URL**: `/api/v2/ai-adviser/conversations/{conversation}`
 - **Auth**: required
 
-#### Behaviour
-
-- Ensures authenticated user is part of conversation (`involvesUser`).
-- Returns all `messages` ordered by `created_at`, mapped to:
-
-```json
-{
-  "id": 456,
-  "role": "user" | "assistant",
-  "content": "message text here",
-  "created_at": "2026-03-16T10:00:00.000000Z"
-}
-```
+Returns all messages in a conversation with full conversation metadata.
 
 #### Success Response (200)
 
 ```json
 {
-  "message": "AI adviser conversation fetched.",
+  "message": "AI adviser conversation details.",
   "success": true,
   "code": 200,
   "data": {
-    "conversation_id": 123,
+    "conversation": {
+      "id": 42,
+      "subject": "JEE Study Plan",
+      "status": "active",
+      "total_messages": 4,
+      "started_at": "2026-03-16T10:30:00+00:00",
+      "last_active_at": "2026-03-16T10:35:01+00:00"
+    },
     "messages": [
       {
         "id": 1,
         "role": "user",
-        "content": "I am a student preparing for JEE...",
-        "created_at": "2026-03-16T10:00:00.000000Z"
+        "content": "I am a student preparing for JEE. How should I plan my daily study schedule?",
+        "sent_at": "2026-03-16T10:30:00+00:00"
       },
       {
         "id": 2,
         "role": "assistant",
-        "content": "Here is a suggested daily schedule...",
-        "created_at": "2026-03-16T10:00:01.000000Z"
+        "content": "Here is a suggested daily schedule for your JEE preparation...",
+        "sent_at": "2026-03-16T10:30:01+00:00",
+        "content_sections": [
+          {
+            "type": "heading",
+            "heading": "Daily Study Plan for JEE"
+          },
+          {
+            "type": "paragraph",
+            "body": "A well-structured daily plan is crucial for JEE success."
+          },
+          {
+            "type": "list",
+            "items": [
+              "6:00 AM - 8:00 AM: Physics",
+              "9:00 AM - 11:00 AM: Mathematics",
+              "2:00 PM - 4:00 PM: Chemistry"
+            ]
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "role": "user",
+        "content": "Can you adjust the plan for someone who also has school from 8am to 2pm?",
+        "sent_at": "2026-03-16T10:35:00+00:00"
+      },
+      {
+        "id": 4,
+        "role": "assistant",
+        "content": "Given your school schedule, here is an adjusted plan...",
+        "sent_at": "2026-03-16T10:35:01+00:00",
+        "content_sections": [
+          {
+            "type": "heading",
+            "heading": "Adjusted Study Plan"
+          },
+          {
+            "type": "paragraph",
+            "body": "Your study sessions need to be concentrated in early morning and evening."
+          },
+          {
+            "type": "list",
+            "items": [
+              "5:30 AM - 7:30 AM: Physics",
+              "3:00 PM - 5:00 PM: Mathematics",
+              "6:00 PM - 7:30 PM: Chemistry"
+            ]
+          },
+          {
+            "type": "note",
+            "body": "Use school breaks for quick formula revision."
+          }
+        ]
       }
     ]
   }
 }
 ```
 
+#### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `data.conversation` | object | Conversation metadata |
+| `data.conversation.id` | integer | Conversation ID |
+| `data.conversation.subject` | string/null | Conversation label |
+| `data.conversation.status` | string | Conversation status |
+| `data.conversation.total_messages` | integer | Total message count |
+| `data.conversation.started_at` | string | ISO 8601 creation timestamp |
+| `data.conversation.last_active_at` | string | ISO 8601 last activity timestamp |
+| `data.messages` | array | All messages in chronological order |
+| `data.messages[].content_sections` | array | Structured sections (assistant messages only) |
+
 ---
 
-## 7. Setup & Deployment Checklist
+### 6.5 Get Token Usage
+
+- **Method**: `GET`
+- **URL**: `/api/v2/ai-adviser/usage`
+- **Auth**: required
+
+Returns the authenticated user's current token usage and plan limits.
+
+#### Success Response (200)
+
+```json
+{
+  "message": "AI adviser token usage.",
+  "success": true,
+  "code": 200,
+  "data": {
+    "token_usage": {
+      "tokens_used": 720,
+      "tokens_limit": 100000,
+      "tokens_remaining": 99280,
+      "usage_percentage": 0.72
+    },
+    "is_limit_reached": false
+  }
+}
+```
+
+#### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `data.token_usage.tokens_used` | integer | Total tokens consumed so far |
+| `data.token_usage.tokens_limit` | integer | Maximum tokens allowed by plan |
+| `data.token_usage.tokens_remaining` | integer | Tokens still available |
+| `data.token_usage.usage_percentage` | float | Percentage of limit used (0-100) |
+| `data.is_limit_reached` | boolean | `true` if no tokens remaining |
+
+---
+
+## 7. Error Responses
+
+### 7.1 Token Limit Exceeded (402)
+
+Returned when a reply would push the user over their token limit.
+
+```json
+{
+  "message": "AI token limit exceeded. Please upgrade your AI subscription plan.",
+  "success": false,
+  "code": 402,
+  "errors": {
+    "tokens_used": 99800,
+    "tokens_limit": 100000,
+    "tokens_remaining": 200
+  }
+}
+```
+
+### 7.2 Forbidden (403)
+
+Returned when a user tries to access a conversation that does not belong to them.
+
+```json
+{
+  "message": "You are not part of this conversation.",
+  "success": false,
+  "code": 403
+}
+```
+
+### 7.3 Validation Error (422)
+
+Returned when required fields are missing or invalid.
+
+```json
+{
+  "message": "Validation failed",
+  "success": false,
+  "code": 422,
+  "errors": {
+    "message": ["The message field is required."]
+  }
+}
+```
+
+---
+
+## 8. Content Sections Reference
+
+Every assistant message includes a `content_sections` array that breaks the AI response into structured blocks. The frontend can loop through this array and render each section with appropriate styling.
+
+### Section Types
+
+| Type | Fields | Frontend Rendering |
+|------|--------|--------------------|
+| `heading` | `heading` (string) | Bold / larger title text |
+| `paragraph` | `body` (string) | Regular text block |
+| `list` | `items` (string[]) | Numbered or bulleted list |
+| `note` | `body` (string) | Highlighted tip / callout box |
+
+### Example: Rendering in a Mobile App
+
+```
+FOR EACH section IN content_sections:
+
+  IF section.type == "heading"
+    --> Render as bold title (e.g. 18px, semi-bold)
+
+  IF section.type == "paragraph"
+    --> Render as normal body text (e.g. 14px, regular)
+
+  IF section.type == "list"
+    --> Render each item in section.items as a numbered/bulleted row
+
+  IF section.type == "note"
+    --> Render in a highlighted card/box with an info icon
+```
+
+### Fallback
+
+If the AI response has no recognizable structure, `content_sections` will contain a single paragraph:
+
+```json
+{
+  "content_sections": [
+    {
+      "type": "paragraph",
+      "body": "The entire response as a single clean text block."
+    }
+  ]
+}
+```
+
+The `content` field always contains the full plain-text version as a fallback for simple displays.
+
+---
+
+## 9. Setup & Deployment Checklist
 
 1. **AI database**
    - Create AI DB (e.g. `suganta_ai`).
@@ -398,19 +731,19 @@ Standard paginated response from `ApiResponse::paginated`, containing conversati
    - Set `GEMINI_API_KEY` and optionally `GEMINI_MODEL_ID`.
 3. **AI system user**
    - Create a dedicated user row in main `users` table (e.g. `ai@suganta.in`).
-   - Set `AI_ADVISER_SYSTEM_USER_ID` to that user’s id.
+   - Set `AI_ADVISER_SYSTEM_USER_ID` to that user's id.
 4. **Migrations**
    - Run: `php artisan migrate`
-     - Creates `ai_conversations`, `ai_messages`, `ai_user_usages` in AI DB.
+   - Creates `ai_conversations`, `ai_messages`, `ai_user_usages` in AI DB.
 5. **Seed AI plans**
    - Run: `php artisan db:seed --class=AiSubscriptionPlanSeeder`
    - Verify `subscription_plans` has `s_type = 2` plans with `features['ai_tokens']`.
 6. **Sanctum auth**
    - Ensure Sanctum is configured and issuing tokens, since v2 routes are protected by `auth:sanctum`.
 
-Once this setup is complete, the AI Adviser v2 endpoints are ready for use by your frontend or external clients. They will automatically:
+Once this setup is complete, the AI Adviser v2 endpoints are ready for use. They will automatically:
 
-- Persist conversation history in the existing messaging system.
-- Store AI meta and usage in the separate AI database.
+- Persist conversation history in the AI database.
+- Return structured, user-friendly responses with `content_sections`.
 - Enforce free and paid token limits via subscription plans.
-
+- Provide real-time token usage snapshots with every AI response.
