@@ -29,7 +29,7 @@ All responses follow this structure:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/v2/reviews` | List reviews for a user |
+| `GET` | `/api/v2/reviews` | List all reviews for a user (latest 10/page, paginated) |
 | `POST` | `/api/v2/reviews` | Submit a review |
 | `GET` | `/api/v2/reviews/{id}` | Get a single review |
 | `PUT/PATCH` | `/api/v2/reviews/{id}` | Update your review |
@@ -71,10 +71,12 @@ Each review object in responses includes:
 
 ## 4. Endpoints Reference
 
-### 4.1 List Reviews for a User
+### 4.1 List All Reviews for a User (Latest First, Paginated)
 
 **Method**: `GET`  
 **URL**: `/api/v2/reviews`
+
+Returns all reviews for a user, latest first, 10 per page by default.
 
 **Query Parameters**
 
@@ -87,7 +89,7 @@ Each review object in responses includes:
 | `has_comment` | No | boolean | Filter reviews with comments |
 | `search` | No | string | Search in title/comment |
 | `sort` | No | string | `latest`, `oldest`, `highest`, `lowest`, `helpful` |
-| `per_page` | No | integer | 1–50 (default 15) |
+| `per_page` | No | integer | 1–50 (default 10) |
 
 **Example Request**
 
@@ -103,7 +105,7 @@ Accept: application/json
 {
   "success": true,
   "code": 200,
-  "message": "Reviews retrieved successfully",
+  "message": "User reviews fetched successfully.",
   "data": {
     "data": [
       {
@@ -186,7 +188,7 @@ Content-Type: application/json
 {
   "success": true,
   "code": 201,
-  "message": "Review submitted successfully",
+  "message": "Thank you! Your review has been submitted successfully.",
   "data": {
     "id": 10,
     "rating": 5,
@@ -214,8 +216,8 @@ Content-Type: application/json
 | Code | Condition |
 |------|-----------|
 | 422 | Validation failed (missing/invalid fields) |
-| 409 | Duplicate review (already reviewed this user) |
-| 403 | Self-review not allowed (reviewable_id = your user_id) |
+| 409 | You have already submitted a review for this user. You can edit your existing review instead. |
+| 403 | You cannot review yourself. |
 
 ---
 
@@ -580,7 +582,7 @@ Content-Type: application/json
 
 ```json
 {
-  "message": "You have already reviewed this user.",
+  "message": "You have already submitted a review for this user. You can edit your existing review instead.",
   "success": false,
   "code": 409
 }
@@ -590,7 +592,7 @@ Content-Type: application/json
 
 ```json
 {
-  "message": "You are not allowed to review this entity.",
+  "message": "You cannot review yourself.",
   "success": false,
   "code": 403
 }

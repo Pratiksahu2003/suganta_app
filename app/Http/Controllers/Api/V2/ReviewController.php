@@ -22,7 +22,7 @@ class ReviewController extends Controller
 
     /**
      * GET /v2/reviews
-     * List reviews for a specific user.
+     * List all reviews for a user. Latest first, 10 per page by default, paginated.
      *
      * Query params: reviewable_type=user, reviewable_id=user_id, rating, verified, has_comment, search, sort, per_page
      */
@@ -37,23 +37,29 @@ class ReviewController extends Controller
             'search' => ['nullable', 'string', 'max:255'],
             'sort' => ['nullable', 'string', 'in:latest,oldest,highest,lowest,helpful'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:50'],
+        ], [
+            'reviewable_type.required' => 'Please specify the user (reviewable_type and reviewable_id).',
+            'reviewable_id.required' => 'Please specify the user ID you want to view reviews for.',
         ]);
+
+        $filters = $request->only(['rating', 'verified', 'has_comment', 'search', 'sort', 'per_page']);
+        $filters['per_page'] = $filters['per_page'] ?? 10;
 
         $reviews = $this->reviewService->getReviewsForEntity(
             $request->input('reviewable_type'),
             (int) $request->input('reviewable_id'),
-            $request->only(['rating', 'verified', 'has_comment', 'search', 'sort', 'per_page']),
+            $filters,
         );
 
         return $this->paginated(
             ReviewResource::collection($reviews),
-            'Reviews retrieved successfully',
+            'User reviews fetched successfully.',
         );
     }
 
     /**
      * POST /v2/reviews
-     * Create a new review.
+     * Submit a new review.
      */
     public function store(StoreReviewRequest $request): JsonResponse
     {
@@ -64,7 +70,7 @@ class ReviewController extends Controller
 
         return $this->created(
             new ReviewResource($review),
-            'Review submitted successfully',
+            'Thank you! Your review has been submitted successfully.',
         );
     }
 
@@ -77,7 +83,7 @@ class ReviewController extends Controller
         $review->load(['user', 'reviewable']);
 
         return $this->success(
-            'Review retrieved successfully',
+            'Review details fetched successfully.',
             new ReviewResource($review),
         );
     }
@@ -95,7 +101,7 @@ class ReviewController extends Controller
         );
 
         return $this->success(
-            'Review updated successfully',
+            'Your review has been updated successfully.',
             new ReviewResource($review),
         );
     }
@@ -108,7 +114,7 @@ class ReviewController extends Controller
     {
         $this->reviewService->deleteReview($review, $request->user());
 
-        return $this->success('Review deleted successfully');
+        return $this->success('Your review has been deleted successfully.');
     }
 
     /**
@@ -130,7 +136,7 @@ class ReviewController extends Controller
 
         return $this->paginated(
             ReviewResource::collection($reviews),
-            'Your reviews retrieved successfully',
+            'Your reviews fetched successfully.',
         );
     }
 
@@ -152,7 +158,7 @@ class ReviewController extends Controller
             (int) $request->input('reviewable_id'),
         );
 
-        return $this->success('Review statistics retrieved successfully', $stats);
+        return $this->success('Rating statistics fetched successfully.', $stats);
     }
 
     /**
@@ -163,32 +169,37 @@ class ReviewController extends Controller
     {
         $review = $this->reviewService->markHelpful($review, $request->user());
 
-        return $this->success('Review marked as helpful', [
+        return $this->success('Thanks! You marked this review as helpful.', [
             'helpful_count' => $review->helpful_count,
         ]);
     }
 
     /**
      * POST /v2/reviews/{review}/reply
-     * Owner of the reviewed entity can reply.
+     * The reviewed user can reply to the review.
      */
     public function reply(Request $request, Review $review): JsonResponse
     {
         $request->validate([
             'reply' => ['required', 'string', 'max:3000'],
+        ], [
+            'reply.required' => 'Please enter your reply.',
+            'reply.max' => 'Reply cannot exceed 3000 characters.',
         ]);
 
         $user = $request->user();
         $reviewable = $review->reviewable;
 
-        if (!$reviewable || !isset($reviewable->user_id) || $reviewable->user_id !== $user->id) {
-            return $this->forbidden('Only the owner of the reviewed entity can reply.');
+        $canReply = $reviewable && $review->reviewable_id === $user->id;
+
+        if (!$canReply) {
+            return $this->forbidden('Only the reviewed user can reply to this review.');
         }
 
         $review = $this->reviewService->replyToReview($review, $request->input('reply'));
 
         return $this->success(
-            'Reply added successfully',
+            'Your reply has been added successfully.',
             new ReviewResource($review),
         );
     }
@@ -201,6 +212,9 @@ class ReviewController extends Controller
     {
         $request->validate([
             'reason' => ['required', 'string', 'max:1000'],
+        ], [
+            'reason.required' => 'Please provide a reason for reporting.',
+            'reason.max' => 'Reason cannot exceed 1000 characters.',
         ]);
 
         if ($review->user_id === $request->user()->id) {
@@ -213,7 +227,7 @@ class ReviewController extends Controller
             $request->input('reason'),
         );
 
-        return $this->success('Review reported successfully. Our team will review it.', $report);
+        return $this->success('Thank you. Your report has been submitted. Our team will review it shortly.', $report);
     }
 
     /**
@@ -248,6 +262,6 @@ class ReviewController extends Controller
             'existing_review' => $existingReview ? new ReviewResource($existingReview->load('user')) : null,
         ];
 
-        return $this->success('Review eligibility checked', $data);
+        return $this->success('Review eligibility checked successfully.', $data);
     }
 }

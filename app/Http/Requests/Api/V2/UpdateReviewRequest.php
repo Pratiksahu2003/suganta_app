@@ -25,10 +25,13 @@ class UpdateReviewRequest extends FormRequest
     public function messages(): array
     {
         return [
+            'rating.required' => 'Please provide a rating (1–5 stars).',
             'rating.min' => 'Rating must be at least 1 star.',
             'rating.max' => 'Rating cannot exceed 5 stars.',
-            'comment.max' => 'Review comment cannot exceed 5000 characters.',
+            'title.max' => 'Title cannot exceed 255 characters.',
+            'comment.max' => 'Your review comment cannot exceed 5000 characters.',
             'tags.max' => 'You can add a maximum of 10 tags.',
+            'tags.*.max' => 'Each tag cannot exceed 50 characters.',
         ];
     }
 }

@@ -35,13 +35,13 @@ class ReviewService
 
         if ($this->hasExistingReview($user, $reviewable)) {
             throw new DuplicateReviewException(
-                'You have already reviewed this ' . $data['reviewable_type'] . '.'
+                'You have already submitted a review for this user. You can edit your existing review instead.'
             );
         }
 
         if (!$this->canUserReview($user, $reviewable)) {
             throw new ReviewNotAllowedException(
-                'You are not allowed to review this entity.'
+                'You cannot review yourself.'
             );
         }
 
@@ -108,7 +108,7 @@ class ReviewService
         $this->applyFilters($query, $filters);
         $this->applySorting($query, $filters['sort'] ?? 'latest');
 
-        return $query->paginate($filters['per_page'] ?? 15);
+        return $query->paginate($filters['per_page'] ?? 10);
     }
 
     public function getUserReviews(User $user, array $filters = []): LengthAwarePaginator
@@ -228,7 +228,7 @@ class ReviewService
     {
         if ($review->user_id !== $user->id) {
             throw new AuthorizationException(
-                'You can only modify your own reviews.'
+                'You can only edit or delete your own reviews.'
             );
         }
     }
