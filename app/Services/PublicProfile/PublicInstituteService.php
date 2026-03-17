@@ -13,7 +13,7 @@ class PublicInstituteService
     private const RELATED_CACHE_TTL = 300;
 
     private const LIST_RELATIONS = [
-        'profile:id,user_id,display_name,first_name,last_name,bio,city,state,area,pincode,profile_image,cover_image,gallery_images,slug,is_active,is_featured,is_verified,latitude,longitude,website,phone_primary,whatsapp',
+        'profile:id,user_id,display_name,first_name,last_name,bio,city,state,area,pincode,profile_image,slug,is_active,is_featured,is_verified,latitude,longitude,website,phone_primary,whatsapp',
         'profile.instituteInfo',
     ];
 
@@ -21,6 +21,7 @@ class PublicInstituteService
         'profile',
         'profile.instituteInfo',
         'profile.socialLinks',
+        'portfolio'
     ];
 
     private const SORT_MAP = [
@@ -60,7 +61,7 @@ class PublicInstituteService
     public function baseListQuery(): Builder
     {
         return User::with(self::LIST_RELATIONS)
-            ->whereIn('role', ['institute', 'ngo'])
+            ->whereIn('role', ['institute', 'university'])
             ->whereNotNull('email_verified_at')
             ->whereIn('registration_fee_status', ['paid', 'not_required']);
     }
@@ -70,7 +71,7 @@ class PublicInstituteService
     public function findForShow(int $id): ?User
     {
         return User::with(self::SHOW_RELATIONS)
-            ->whereIn('role', ['institute', 'ngo'])
+            ->whereIn('role', ['institute', 'university'])
             ->whereNotNull('email_verified_at')
             ->whereIn('registration_fee_status', ['paid', 'not_required'])
             ->where('id', $id)
@@ -80,7 +81,7 @@ class PublicInstituteService
     public function findForShowBySlug(string $slug): ?User
     {
         return User::with(self::SHOW_RELATIONS)
-            ->whereIn('role', ['institute', 'ngo'])
+            ->whereIn('role', ['institute', 'university'])
             ->whereNotNull('email_verified_at')
             ->whereIn('registration_fee_status', ['paid', 'not_required'])
             ->whereHas('profile', fn ($q) => $q->where('slug', $slug))
@@ -114,7 +115,7 @@ class PublicInstituteService
     public function getInstituteCities(int $limit = 50): array
     {
         return Cache::remember('institute_cities_profile', 3600, function () use ($limit) {
-            return User::whereIn('role', ['institute', 'ngo'])
+            return User::whereIn('role', ['institute', 'university'])
                 ->whereNotNull('email_verified_at')
                 ->whereIn('registration_fee_status', ['paid', 'not_required'])
                 ->join('profiles', 'users.id', '=', 'profiles.user_id')
