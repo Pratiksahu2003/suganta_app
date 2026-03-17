@@ -16,16 +16,20 @@ class AiAdviserService
     /**
      * Provider-agnostic entry point for the AI adviser.
      *
+     * Controlled entirely by env:
+     *   AI_ADVISER_PROVIDER = 'gemini' | 'grok'
+     *
      * @return array{text:string,sections:array,usage:array|null,raw:array}
      */
     public function generateReply(string $prompt, array $history = []): array
     {
-        $provider = env('AI_ADVISER_PROVIDER', 'gemini'); // 'gemini' or 'grok'
+        $provider = strtolower((string) env('AI_ADVISER_PROVIDER', 'gemini'));
 
         if ($provider === 'grok') {
             return $this->grok->generateReply($prompt, $history);
         }
 
+        // Fallback/default: Gemini
         return $this->gemini->generateReply($prompt, $history);
     }
 

@@ -158,7 +158,9 @@ class AiAdviserController extends Controller
             'user_id' => $user->id,
             'subject' => $validated['subject'] ?? null,
             'status' => 'active',
-            'model' => config('gemini.model_id', 'gemini-2.5-flash-lite'),
+            'model' => env('AI_ADVISER_PROVIDER', 'gemini') === 'grok'
+                ? env('GROK_MODEL_ID', 'grok-2-latest')
+                : config('gemini.model_id', 'gemini-2.5-flash-lite'),
             'purpose' => 'ai_adviser',
             'settings' => [],
         ]);
@@ -249,6 +251,7 @@ class AiAdviserController extends Controller
             'role' => 'user',
         ]);
 
+        // Provider is chosen only via env in AiAdviserService.
         $result = $this->ai->generateReply($validated['message'], $history);
 
         $totalTokens = 0;
