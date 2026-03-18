@@ -23,7 +23,7 @@ class AiAdviserService
      */
     public function generateReply(string $prompt, array $history = []): array
     {
-        $provider = strtolower((string) env('AI_ADVISER_PROVIDER', 'gemini'));
+        $provider = strtolower((string) config('app.ai_provider', 'gemini'));
 
         if ($provider === 'grok') {
             return $this->grok->generateReply($prompt, $history);

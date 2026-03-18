@@ -15,8 +15,8 @@ class GrokAiService
      */
     public function generateReply(string $prompt, array $history = []): array
     {
-        $apiKey = env('GROK_API_KEY');
-        $modelId = env('GROK_MODEL_ID', 'grok-2-latest');
+        $apiKey = config('app.grok_key' , 'null');
+        $modelId = config('app.grok_model', 'grok-2-latest');
 
         if (empty($apiKey)) {
             throw new Exception('Grok API key is not configured.');

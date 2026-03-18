@@ -135,4 +135,12 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+    // AI Provider Configartion 
+    'ai_provider' => env('AI_ADVISER_PROVIDER', 'gemini'),
+     
+
+    // Grok AI API Keys 
+    'grok_key' => env('GROK_API_KEY'),
+    'grok_model' => env('GROK_MODEL_ID'),
+
 ];
