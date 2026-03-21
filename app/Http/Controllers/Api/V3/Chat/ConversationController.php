@@ -48,9 +48,10 @@ class ConversationController extends Controller
         }
 
         $users = $usersQuery
+            ->with('profile:id,user_id,profile_image')
             ->orderBy('name')
             ->limit($limit)
-            ->get(['id', 'name', 'phone', 'profile_image']);
+            ->get(['id', 'name', 'phone']);
 
         $existingPrivateMap = collect();
         if ($users->isNotEmpty()) {
@@ -74,7 +75,7 @@ class ConversationController extends Controller
                 'id' => $user->id,
                 'name' => $user->name,
                 'phone' => $user->phone,
-                'profile_image' => $user->profile_image,
+                'profile_image' => storage_file_url($user->profile?->profile_image),
                 'has_private_conversation' => $privateConversationId !== null,
                 'private_conversation_id' => $privateConversationId,
             ];
