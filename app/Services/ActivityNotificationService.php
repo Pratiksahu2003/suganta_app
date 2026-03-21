@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Models\User;
 use App\Models\TeacherSession;
 use App\Models\SupportTicket;
-use App\Models\Message;
 use App\Models\Payment;
 use App\Models\Review;
 use App\Models\Institute;
@@ -428,45 +427,6 @@ class ActivityNotificationService
         } catch (Exception $e) {
             Log::error('Failed to send support ticket replied notification', [
                 'ticket_id' => $ticket->id ?? null,
-                'error' => $e->getMessage()
-            ]);
-        }
-    }
-
-    public function newMessage(Message $message): void
-    {
-        try {
-            $sender = $message->sender;
-            $recipient = $message->recipient;
-
-            if (!$sender || !$recipient) {
-                Log::warning('New message notification skipped: sender or recipient not found', ['message_id' => $message->id]);
-                return;
-            }
-
-            $contentPreview = $this->truncateText($message->content, 100);
-
-            $this->notificationService->createUserNotification(
-                $recipient->id,
-                'New Message',
-                "You have received a new message from {$sender->name}: {$contentPreview}",
-                'message',
-                [
-                    'message_id' => $message->id,
-                    'sender_id' => $sender->id,
-                    'sender_name' => $sender->name,
-                    'content_preview' => $contentPreview,
-                    'sent_at' => $message->created_at ?? now(),
-                    'resource_type' => 'message',
-                    'resource_id' => $message->id,
-                    'action' => 'view'
-                ],
-                null,
-                'normal'
-            );
-        } catch (Exception $e) {
-            Log::error('Failed to send new message notification', [
-                'message_id' => $message->id ?? null,
                 'error' => $e->getMessage()
             ]);
         }

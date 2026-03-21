@@ -42,9 +42,6 @@ trait HasActivityNotifications
             case 'App\Models\SupportTicket':
                 $notificationService->supportTicketCreated($this);
                 break;
-            case 'App\Models\Message':
-                $notificationService->newMessage($this);
-                break;
             case 'App\Models\Payment':
                 if ($this->status === 'completed') {
                     $notificationService->paymentSuccessful($this);

@@ -12,3 +12,4 @@
 
 require __DIR__.'/api/v1.php';
 require __DIR__.'/api/v2.php';
+require __DIR__.'/api/v3.php';
