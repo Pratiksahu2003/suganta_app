@@ -12,6 +12,7 @@ use App\Models\Chat\ChatConversationParticipant;
 use App\Models\Chat\ChatMessage;
 use App\Models\Chat\ChatMessageReaction;
 use App\Models\Chat\ChatMessageRead;
+use App\Support\ChatPlainText;
 use App\Traits\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -23,6 +24,11 @@ class MessageController extends Controller
 
     public function index(Request $request, int $conversation): JsonResponse
     {
+        $request->validate([
+            'before_id' => ['sometimes', 'integer', 'min:1'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+        ]);
+
         $auth = $request->user();
         $chat = ChatConversation::findOrFail($conversation);
 
@@ -30,12 +36,26 @@ class MessageController extends Controller
             return $this->forbidden('You are not part of this conversation.');
         }
 
+        $perPage = (int) $request->query('per_page', 50);
+
         $messages = ChatMessage::query()
             ->where('conversation_id', $chat->id)
             ->whereNull('deleted_at')
-            ->with(['reactions', 'reads'])
+            ->when($request->filled('before_id'), function ($q) use ($request): void {
+                $q->where('id', '<', (int) $request->query('before_id'));
+            })
+            ->with([
+                'reactions',
+                'reads',
+                'replyTo' => static function ($query): void {
+                    $query->select(['id', 'conversation_id', 'sender_id', 'message', 'created_at', 'deleted_at']);
+                },
+            ])
             ->orderByDesc('id')
-            ->paginate(50);
+            ->paginate($perPage);
+
+        $viewerId = $auth->id;
+        $messages->through(fn (ChatMessage $m) => $this->serializeChatMessage($m, $viewerId));
 
         return $this->success('Messages fetched successfully.', $messages);
     }
@@ -45,7 +65,6 @@ class MessageController extends Controller
         $validated = $request->validate([
             'message' => ['required', 'string', 'max:10000'],
             'reply_to' => ['nullable', 'integer', 'exists:ai_mysql.chat_messages,id'],
-            'meta' => ['nullable', 'array'],
         ]);
 
         $auth = $request->user();
@@ -67,13 +86,18 @@ class MessageController extends Controller
             }
         }
 
-        $message = DB::connection('ai_mysql')->transaction(function () use ($validated, $chat, $auth) {
+        $body = ChatPlainText::sanitize($validated['message']);
+        if (ChatPlainText::isEmpty($body)) {
+            return $this->validationError(['message' => ['Message must contain visible text or emoji.']]);
+        }
+
+        $message = DB::connection('ai_mysql')->transaction(function () use ($validated, $chat, $auth, $body) {
             $message = ChatMessage::create([
                 'conversation_id' => $chat->id,
                 'sender_id' => $auth->id,
-                'message' => $validated['message'],
+                'message' => $body,
                 'reply_to' => $validated['reply_to'] ?? null,
-                'meta' => $validated['meta'] ?? null,
+                'meta' => null,
             ]);
 
             $chat->update([
@@ -87,7 +111,13 @@ class MessageController extends Controller
         broadcast(new MessageSent($message))->toOthers();
 
         return $this->created([
-            'message' => $message->load(['reactions', 'reads']),
+            'message' => $this->serializeChatMessage($message->load([
+                'reactions',
+                'reads',
+                'replyTo' => static function ($query): void {
+                    $query->select(['id', 'conversation_id', 'sender_id', 'message', 'created_at', 'deleted_at']);
+                },
+            ]), $auth->id),
         ], 'Message sent successfully.');
     }
 
@@ -108,15 +138,30 @@ class MessageController extends Controller
             return $this->error('Deleted messages cannot be edited.', 422);
         }
 
+        $body = ChatPlainText::sanitize($validated['message']);
+        if (ChatPlainText::isEmpty($body)) {
+            return $this->validationError(['message' => ['Message must contain visible text or emoji.']]);
+        }
+
         $chatMessage->update([
-            'message' => $validated['message'],
+            'message' => $body,
             'is_edited' => true,
             'edited_at' => now(),
         ]);
 
-        broadcast(new MessageSent($chatMessage->fresh()))->toOthers();
+        $fresh = $chatMessage->fresh()->load([
+            'reactions',
+            'reads',
+            'replyTo' => static function ($query): void {
+                $query->select(['id', 'conversation_id', 'sender_id', 'message', 'created_at', 'deleted_at']);
+            },
+        ]);
 
-        return $this->success('Message updated successfully.', ['message' => $chatMessage->fresh()]);
+        broadcast(new MessageSent($fresh))->toOthers();
+
+        return $this->success('Message updated successfully.', [
+            'message' => $this->serializeChatMessage($fresh, $auth->id),
+        ]);
     }
 
     public function destroy(Request $request, int $message): JsonResponse
@@ -155,6 +200,19 @@ class MessageController extends Controller
             ['read_at' => now()]
         );
 
+        $participant = ChatConversationParticipant::query()
+            ->where('conversation_id', $chatMessage->conversation_id)
+            ->where('user_id', $auth->id)
+            ->whereNull('left_at')
+            ->first();
+        if ($participant !== null) {
+            $current = $participant->last_read_message_id;
+            if ($current === null || $chatMessage->id > $current) {
+                $participant->last_read_message_id = $chatMessage->id;
+                $participant->save();
+            }
+        }
+
         broadcast(new MessageRead(
             $chatMessage->conversation_id,
             $chatMessage->id,
@@ -168,7 +226,16 @@ class MessageController extends Controller
     public function react(Request $request, int $message): JsonResponse
     {
         $validated = $request->validate([
-            'reaction' => ['required', 'string', 'max:32'],
+            'reaction' => [
+                'required',
+                'string',
+                'max:16',
+                function (string $attribute, mixed $value, \Closure $fail): void {
+                    if (! is_string($value) || preg_match('/\p{Extended_Pictographic}/u', $value) !== 1) {
+                        $fail('Reaction must be emoji-based (text-only stickers are not supported).');
+                    }
+                },
+            ],
         ]);
 
         $auth = $request->user();
@@ -248,5 +315,84 @@ class MessageController extends Controller
             ->where('user_id', $userId)
             ->whereNull('left_at')
             ->exists();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function serializeChatMessage(ChatMessage $message, ?int $viewerUserId = null): array
+    {
+        $replyPayload = $this->replyToMessagePayload($message);
+        $message->unsetRelation('replyTo');
+
+        $reactions = $message->relationLoaded('reactions') ? $message->reactions : collect();
+        $reads = $message->relationLoaded('reads') ? $message->reads : collect();
+
+        $reactionSummary = $reactions->groupBy('reaction')->map(function ($group) {
+            $first = $group->first();
+
+            return [
+                'emoji' => $first !== null ? $first->reaction : '',
+                'count' => $group->count(),
+                'user_ids' => $group->pluck('user_id')->unique()->values()->all(),
+            ];
+        })->values()->all();
+
+        $myReaction = null;
+        if ($viewerUserId !== null) {
+            $myReaction = $reactions->firstWhere('user_id', $viewerUserId)?->reaction;
+        }
+
+        $data = $message->toArray();
+        unset($data['reactions'], $data['reads']);
+        $data['reply_to_message'] = $replyPayload;
+        $data['reaction_summary'] = $reactionSummary;
+        $data['my_reaction'] = $myReaction;
+        $data['read_by_user_ids'] = $reads->pluck('user_id')->unique()->values()->all();
+
+        return $data;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    protected function replyToMessagePayload(ChatMessage $message): ?array
+    {
+        if (! $message->reply_to) {
+            return null;
+        }
+
+        $parent = $message->relationLoaded('replyTo') ? $message->replyTo : null;
+
+        if (! $parent) {
+            return [
+                'id' => (int) $message->reply_to,
+                'sender_id' => null,
+                'message' => null,
+                'is_unavailable' => true,
+            ];
+        }
+
+        if ($parent->deleted_at !== null) {
+            return [
+                'id' => $parent->id,
+                'sender_id' => $parent->sender_id,
+                'message' => null,
+                'is_unavailable' => true,
+            ];
+        }
+
+        $text = (string) $parent->message;
+        if (mb_strlen($text) > 240) {
+            $text = mb_substr($text, 0, 240).'…';
+        }
+
+        return [
+            'id' => $parent->id,
+            'sender_id' => $parent->sender_id,
+            'message' => $text,
+            'created_at' => optional($parent->created_at)->toIso8601String(),
+            'is_unavailable' => false,
+        ];
     }
 }

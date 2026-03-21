@@ -10,6 +10,8 @@ Route::prefix('v3')->middleware('auth:sanctum')->group(function (): void {
         Route::get('conversations', [ConversationController::class, 'index']);
         Route::post('conversations', [ConversationController::class, 'store']);
         Route::get('conversations/{conversation}', [ConversationController::class, 'show'])->whereNumber('conversation');
+        Route::patch('conversations/{conversation}', [ConversationController::class, 'update'])->whereNumber('conversation');
+        Route::post('conversations/{conversation}/read', [ConversationController::class, 'markRead'])->whereNumber('conversation');
         Route::post('conversations/{conversation}/participants', [ConversationController::class, 'addParticipant'])->whereNumber('conversation');
         Route::delete('conversations/{conversation}/participants/{user}', [ConversationController::class, 'removeParticipant'])->whereNumber(['conversation', 'user']);
         Route::post('conversations/{conversation}/leave', [ConversationController::class, 'leave'])->whereNumber('conversation');
