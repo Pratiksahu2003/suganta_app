@@ -398,8 +398,12 @@ class ConversationController extends Controller
     /**
      * @return array<string, mixed>|null
      */
-    protected function lastMessagePreview(?ChatMessage $message, int $authUserId): ?array
-    {
+    protected function lastMessagePreview(
+        ?ChatMessage $message,
+        int $authUserId,
+        string $authUserName,
+        Collection $usersById,
+    ): ?array {
         if ($message === null) {
             return null;
         }
@@ -409,10 +413,17 @@ class ConversationController extends Controller
             $text = mb_substr($text, 0, 200).'…';
         }
 
+        $isMine = (int) $message->sender_id === $authUserId;
+        $sender = $usersById->get($message->sender_id);
+        $senderName = $isMine
+            ? $authUserName
+            : ($sender instanceof User ? $sender->name : 'User');
+
         return [
             'id' => $message->id,
             'sender_id' => $message->sender_id,
-            'is_mine' => (int) $message->sender_id === $authUserId,
+            'sender_name' => $senderName,
+            'is_mine' => $isMine,
             'text' => $text,
             'created_at' => optional($message->created_at)->toIso8601String(),
         ];
@@ -429,6 +440,7 @@ class ConversationController extends Controller
         int $authUserId,
         ?ChatConversationParticipant $myParticipant,
         int $unreadCount,
+        string $authUserName,
     ): array {
         $base = $conv->toArray();
         $peer = null;
@@ -462,7 +474,11 @@ class ConversationController extends Controller
             $base['peer'] = null;
         }
 
-        $base['last_message'] = $this->lastMessagePreview($lastMessage, $authUserId);
+        $base['user_name'] = $conv->type === 'private'
+            ? ($peer !== null ? $peer['name'] : $base['display_title'])
+            : $base['display_title'];
+
+        $base['last_message'] = $this->lastMessagePreview($lastMessage, $authUserId, $authUserName, $usersById);
         $base['unread_count'] = $unreadCount;
         $base['muted'] = $myParticipant !== null && $myParticipant->muted_at !== null;
         $base['archived'] = $myParticipant !== null && $myParticipant->archived_at !== null;
@@ -500,16 +516,21 @@ class ConversationController extends Controller
 
         $userIds = $participantsByConv->flatten()->pluck('user_id')->unique()->values()->all();
 
-        $usersById = User::query()
-            ->whereIn('id', $userIds)
-            ->with('profile:id,user_id,profile_image')
-            ->get(['id', 'name', 'phone'])
-            ->keyBy('id');
-
         $lastMessageIds = $conversations->pluck('last_message_id')->filter()->unique()->values()->all();
         $lastMessages = $lastMessageIds === []
             ? collect()
             : ChatMessage::query()->whereIn('id', $lastMessageIds)->get()->keyBy('id');
+
+        $lastSenderIds = $lastMessages->pluck('sender_id')->unique()->filter()->values()->all();
+        $allUserIds = collect($userIds)->merge($lastSenderIds)->unique()->values()->all();
+
+        $usersById = $allUserIds === []
+            ? collect()
+            : User::query()
+                ->whereIn('id', $allUserIds)
+                ->with('profile:id,user_id,profile_image')
+                ->get(['id', 'name', 'phone'])
+                ->keyBy('id');
 
         return $conversations->map(function (ChatConversation $conv) use ($participantsByConv, $usersById, $lastMessages, $auth, $myParticipants, $unreadCounts) {
             $rows = $participantsByConv->get($conv->id, collect());
@@ -517,7 +538,7 @@ class ConversationController extends Controller
             $mine = $myParticipants->get($conv->id);
             $unread = (int) $unreadCounts->get($conv->id, 0);
 
-            return $this->presentConversationForList($conv, $rows, $usersById, $last, $auth->id, $mine, $unread);
+            return $this->presentConversationForList($conv, $rows, $usersById, $last, $auth->id, $mine, $unread, (string) $auth->name);
         });
     }
 
