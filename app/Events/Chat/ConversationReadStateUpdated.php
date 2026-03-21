@@ -6,6 +6,7 @@ use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
 
 class ConversationReadStateUpdated implements ShouldBroadcastNow
 {
@@ -17,7 +18,15 @@ class ConversationReadStateUpdated implements ShouldBroadcastNow
         public int $userId,
         public ?int $lastReadMessageId,
         public string $readAt,
-    ) {}
+    ) {
+        Log::channel('reverb')->info('ConversationReadStateUpdated dispatched', [
+            'event' => 'chat.conversation.read_state',
+            'channel' => 'private-chat.conversation.'.$conversationId,
+            'user_id' => $userId,
+            'last_read_message_id' => $lastReadMessageId,
+            'read_at' => $readAt,
+        ]);
+    }
 
     public function broadcastOn(): array
     {

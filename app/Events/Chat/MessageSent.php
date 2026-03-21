@@ -7,6 +7,7 @@ use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
 
 class MessageSent implements ShouldBroadcastNow
 {
@@ -14,6 +15,13 @@ class MessageSent implements ShouldBroadcastNow
 
     public function __construct(public ChatMessage $message)
     {
+        Log::channel('reverb')->info('MessageSent dispatched', [
+            'event' => 'chat.message.sent',
+            'channel' => 'private-chat.conversation.'.$message->conversation_id,
+            'message_id' => $message->id,
+            'conversation_id' => $message->conversation_id,
+            'sender_id' => $message->sender_id,
+        ]);
     }
 
     public function broadcastOn(): array

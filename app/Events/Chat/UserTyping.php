@@ -6,6 +6,7 @@ use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
 
 class UserTyping implements ShouldBroadcastNow
 {
@@ -16,6 +17,12 @@ class UserTyping implements ShouldBroadcastNow
         public int $userId,
         public bool $isTyping
     ) {
+        Log::channel('reverb')->info('UserTyping dispatched', [
+            'event' => 'chat.user.typing',
+            'channel' => 'private-chat.conversation.'.$conversationId,
+            'user_id' => $userId,
+            'is_typing' => $isTyping,
+        ]);
     }
 
     public function broadcastOn(): array
