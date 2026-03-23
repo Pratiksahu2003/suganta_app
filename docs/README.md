@@ -35,6 +35,7 @@ Welcome to the SuGanta API documentation! This folder contains comprehensive doc
 
 ### Integrations
 - [SMS Integration](./SMS_INTEGRATION.md) - SMS service integration guide
+- [Firebase Push (Flutter)](./FirebasePushFlutter.md) - FCM setup and API integration for Flutter
 
 ---
 

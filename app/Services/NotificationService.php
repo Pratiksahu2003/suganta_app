@@ -7,6 +7,10 @@ use App\Models\User;
 
 class NotificationService
 {
+    public function __construct(private readonly FirebasePushService $firebasePushService)
+    {
+    }
+
     /**
      * Create a notification for a user
      */
@@ -19,7 +23,7 @@ class NotificationService
         ?string $actionUrl = null,
         string $priority = 'normal'
     ): Notification {
-        return Notification::create([
+        $notification = Notification::create([
             'id' => \Illuminate\Support\Str::uuid(),
             'type' => 'App\Notifications\SystemNotification',
             'notifiable_type' => User::class,
@@ -33,6 +37,19 @@ class NotificationService
             ]),
             'read_at' => null,
         ]);
+
+        $user = User::query()->find($userId);
+        if ($user !== null) {
+            $this->firebasePushService->sendToUser($user, $title, $message, [
+                'kind' => 'system_notification',
+                'notification_id' => (string) $notification->id,
+                'type' => $type,
+                'priority' => $priority,
+                'action_url' => $actionUrl,
+            ]);
+        }
+
+        return $notification;
     }
 
     /**

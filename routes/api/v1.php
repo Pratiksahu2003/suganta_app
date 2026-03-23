@@ -72,8 +72,12 @@ Route::prefix(config('api.version', 'v1'))->group(function (): void {
     // Dashboard (auth only)
     Route::middleware('auth:sanctum')->get('dashboard', [DashboardController::class, 'index']);
 
-    // Notifications (auth user's notifications with pagination)
-    Route::middleware('auth:sanctum')->get('notifications', [NotificationController::class, 'index']);
+    // Notifications (auth user's notifications with pagination + push token registration)
+    Route::middleware('auth:sanctum')->prefix('notifications')->controller(NotificationController::class)->group(function () {
+        Route::get('/', 'index');
+        Route::post('push-token', 'registerPushToken');
+        Route::delete('push-token', 'unregisterPushToken');
+    });
 
     // Admin Dashboard (admin only)
 

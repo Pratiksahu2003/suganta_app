@@ -13,15 +13,22 @@ use App\Models\Chat\ChatConversationParticipant;
 use App\Models\Chat\ChatMessage;
 use App\Models\Chat\ChatMessageReaction;
 use App\Models\Chat\ChatMessageRead;
+use App\Models\User;
+use App\Services\FirebasePushService;
 use App\Support\ChatPlainText;
 use App\Traits\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
 
 class MessageController extends Controller
 {
     use ApiResponse, InteractsWithChatCache;
+
+    public function __construct(private readonly FirebasePushService $firebasePushService)
+    {
+    }
 
     public function index(Request $request, int $conversation): JsonResponse
     {
@@ -124,6 +131,7 @@ class MessageController extends Controller
         $this->flushConversationReadCaches($chat->id, [$auth->id]);
 
         broadcast(new MessageSent($message))->toOthers();
+        $this->sendPushForNewMessage($chat->id, $message, $auth->id, $auth->name);
 
         return $this->created([
             'message' => $this->serializeChatMessage($message->load([
@@ -414,5 +422,33 @@ class MessageController extends Controller
             'created_at' => optional($parent->created_at)->toIso8601String(),
             'is_unavailable' => false,
         ];
+    }
+
+    private function sendPushForNewMessage(int $conversationId, ChatMessage $message, int $senderId, string $senderName): void
+    {
+        $recipientIds = ChatConversationParticipant::query()
+            ->where('conversation_id', $conversationId)
+            ->whereNull('left_at')
+            ->where('user_id', '!=', $senderId)
+            ->pluck('user_id')
+            ->unique()
+            ->values();
+
+        if ($recipientIds->isEmpty()) {
+            return;
+        }
+
+        $recipients = User::query()->whereIn('id', $recipientIds->all())->get(['id', 'push_subscription']);
+        $preview = Str::limit((string) $message->message, 120);
+        $title = "New message from {$senderName}";
+
+        foreach ($recipients as $recipient) {
+            $this->firebasePushService->sendToUser($recipient, $title, $preview, [
+                'kind' => 'chat_message',
+                'conversation_id' => (string) $conversationId,
+                'message_id' => (string) $message->id,
+                'sender_id' => (string) $senderId,
+            ]);
+        }
     }
 }

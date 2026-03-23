@@ -4,12 +4,17 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Models\Notification;
 use App\Models\User;
+use App\Services\FirebasePushService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
 class NotificationController extends BaseApiController
 {
+    public function __construct(private readonly FirebasePushService $firebasePushService)
+    {
+    }
+
     /**
      * Get all notifications for the authenticated user with pagination.
      *
@@ -58,6 +63,43 @@ class NotificationController extends BaseApiController
                 'prev' => $notifications->previousPageUrl(),
                 'next' => $notifications->nextPageUrl(),
             ],
+        ]);
+    }
+
+    public function registerPushToken(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'token' => ['required', 'string', 'max:2048'],
+            'platform' => ['nullable', 'string', 'in:android,ios,web,unknown'],
+            'device_name' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        /** @var User $user */
+        $user = Auth::user();
+        $subscription = $this->firebasePushService->registerToken(
+            $user,
+            $validated['token'],
+            $validated['platform'] ?? 'unknown',
+            $validated['device_name'] ?? null
+        );
+
+        return $this->success('Push token registered successfully.', [
+            'push_subscription' => $subscription,
+        ]);
+    }
+
+    public function unregisterPushToken(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'token' => ['required', 'string', 'max:2048'],
+        ]);
+
+        /** @var User $user */
+        $user = Auth::user();
+        $subscription = $this->firebasePushService->removeToken($user, $validated['token']);
+
+        return $this->success('Push token removed successfully.', [
+            'push_subscription' => $subscription,
         ]);
     }
 
