@@ -182,7 +182,7 @@ class FirebasePushService
 
     private function isConfigured(): bool
     {
-        $credentials = $this->credentialsPath();
+        $credentials = $this->resolvedCredentialsPath();
         if ($credentials === null || trim($credentials) === '') {
             return false;
         }
@@ -196,8 +196,9 @@ class FirebasePushService
 
     private function messaging()
     {
+        $credentials = $this->resolvedCredentialsPath();
         $factory = (new Factory())
-            ->withServiceAccount(config('services.firebase.credentials'));
+            ->withServiceAccount($credentials);
 
         $projectId = config('services.firebase.project_id');
         if (is_string($projectId) && $projectId !== '') {
@@ -211,6 +212,29 @@ class FirebasePushService
     {
         $credentials = config('services.firebase.credentials');
         return is_string($credentials) ? $credentials : null;
+    }
+
+    private function resolvedCredentialsPath(): ?string
+    {
+        $credentials = $this->credentialsPath();
+        if ($credentials === null || trim($credentials) === '') {
+            return null;
+        }
+
+        $credentials = trim($credentials);
+
+        // Support inline JSON credentials as well.
+        if (Str::startsWith($credentials, '{')) {
+            return $credentials;
+        }
+
+        // Absolute path (Windows or Unix)
+        if (preg_match('/^[A-Za-z]:\\\\/', $credentials) === 1 || Str::startsWith($credentials, ['/','\\'])) {
+            return $credentials;
+        }
+
+        // Relative path from Laravel base path (e.g. storage/keys/file.json)
+        return base_path($credentials);
     }
 
     private function removeManyTokens(User $user, array $tokens): void
