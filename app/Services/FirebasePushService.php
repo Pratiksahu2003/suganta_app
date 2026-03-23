@@ -115,14 +115,19 @@ class FirebasePushService
 
     private function isConfigured(): bool
     {
-        return (bool) config('services.firebase.project_id') && (bool) config('services.firebase.credentials');
+        return (bool) config('services.firebase.credentials');
     }
 
     private function messaging()
     {
-        return (new Factory())
-            ->withServiceAccount(config('services.firebase.credentials'))
-            ->withProjectId(config('services.firebase.project_id'))
-            ->createMessaging();
+        $factory = (new Factory())
+            ->withServiceAccount(config('services.firebase.credentials'));
+
+        $projectId = config('services.firebase.project_id');
+        if (is_string($projectId) && $projectId !== '') {
+            $factory = $factory->withProjectId($projectId);
+        }
+
+        return $factory->createMessaging();
     }
 }

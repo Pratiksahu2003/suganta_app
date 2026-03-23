@@ -44,7 +44,7 @@ return [
 
     'firebase' => [
         'project_id' => env('FIREBASE_PROJECT_ID'),
-        'credentials' => env('FIREBASE_CREDENTIALS'),
+        'credentials' => env('FIREBASE_CREDENTIALS', base_path('storage/keys/suganta-tutors-firebase-adminsdk-fbsvc-51a7fa7774.json')),
     ],
 
 ];
