@@ -1,6 +1,6 @@
 # Firebase Push Notifications (Flutter)
 
-This guide explains how to integrate Firebase Cloud Messaging (FCM) in Flutter with the backend APIs added in this project.
+This guide explains end-to-end Flutter implementation for Firebase Cloud Messaging (FCM) with the backend APIs added in this project.
 
 ---
 
@@ -43,6 +43,7 @@ Add in `pubspec.yaml`:
 dependencies:
   firebase_core: ^3.6.0
   firebase_messaging: ^15.1.3
+  flutter_local_notifications: ^17.2.3
   dio: ^5.7.0
 ```
 
@@ -76,7 +77,28 @@ Call `await initFirebase();` before `runApp(...)`.
 
 ---
 
-## 4) Register Token to API
+## 4) Platform Setup (Android + iOS)
+
+### Android
+
+1. Place `google-services.json` in `android/app/`.
+2. Ensure Gradle Firebase plugin is configured.
+3. Add notification permission for Android 13+ in `android/app/src/main/AndroidManifest.xml`:
+
+```xml
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+```
+
+### iOS
+
+1. Place `GoogleService-Info.plist` in `ios/Runner/`.
+2. Enable **Push Notifications** capability in Xcode.
+3. Enable **Background Modes** -> `Remote notifications`.
+4. Upload APNs key/certificate in Firebase Console.
+
+---
+
+## 5) Register Token to API
 
 Use this after login (or whenever token refreshes):
 
@@ -142,7 +164,7 @@ class PushApiService {
 
 ---
 
-## 5) Handle Token Refresh
+## 6) Handle Token Refresh
 
 FCM token can rotate. Always update backend when it changes:
 
@@ -160,15 +182,14 @@ Dispose it on app shutdown/logout.
 
 ---
 
-## 6) Handle Foreground Notifications
+## 7) Handle Foreground Notifications
 
 ```dart
 void listenForegroundMessages() {
   FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-    // Show local notification/banner/snackbar as needed
     final title = message.notification?.title ?? 'Notification';
     final body = message.notification?.body ?? '';
-    // TODO: integrate flutter_local_notifications if needed
+    // Show local notification via flutter_local_notifications
     print('Foreground push: $title - $body');
   });
 }
@@ -176,7 +197,7 @@ void listenForegroundMessages() {
 
 ---
 
-## 7) Handle Notification Taps (Deep Link)
+## 8) Handle Notification Taps (Deep Link)
 
 Backend sends data keys like:
 - `kind` (`chat_message` or `system_notification`)
@@ -226,7 +247,24 @@ Future<void> handleInitialMessage(
 
 ---
 
-## 8) Logout Best Practice
+## 9) App Startup Order (Recommended)
+
+On app launch:
+
+1. `await initFirebase()`
+2. Load auth token from secure storage
+3. If user logged in:
+   - `registerPushToken()`
+   - `listenTokenRefresh(...)`
+   - `listenForegroundMessages()`
+   - `setupPushNavigation(...)`
+   - `handleInitialMessage(...)`
+
+This ensures token sync and deep-link routing are active from first frame.
+
+---
+
+## 10) Logout Best Practice
 
 On logout:
 1. Call backend `DELETE /api/v1/notifications/push-token`
@@ -235,14 +273,19 @@ On logout:
 
 ---
 
-## 9) Server Environment Checklist
+## 11) Server Environment Checklist
 
-Backend `.env` must include:
+Backend `.env` should include:
 
 ```env
-FIREBASE_PROJECT_ID=your-project-id
-FIREBASE_CREDENTIALS=C:\absolute\path\to\firebase-service-account.json
+FIREBASE_CREDENTIALS=storage/keys/suganta-tutors-firebase-adminsdk-fbsvc-51a7fa7774.json
+# FIREBASE_PROJECT_ID=your-project-id   # optional
 ```
+
+Notes:
+- This project already defaults to `storage/keys/suganta-tutors-firebase-adminsdk-fbsvc-51a7fa7774.json` in config.
+- `FIREBASE_PROJECT_ID` is optional because project ID can be resolved from the service account JSON.
+- Keep this JSON file private and never expose it to Flutter/mobile client code.
 
 Then:
 
@@ -252,7 +295,7 @@ php artisan config:clear
 
 ---
 
-## 10) Quick Testing Flow
+## 12) Quick Testing Flow
 
 1. Login from Flutter app
 2. Register push token using API
@@ -260,4 +303,39 @@ php artisan config:clear
 4. Verify receiver gets push
 5. Trigger any backend user notification
 6. Verify push arrives and deep link opens correct screen
+
+---
+
+## 13) Suggested Flutter File Structure
+
+```text
+lib/
+  services/
+    push_api_service.dart
+    push_notification_service.dart
+  core/
+    navigation/
+      app_router.dart
+```
+
+- `push_api_service.dart`: calls backend register/remove token endpoints
+- `push_notification_service.dart`: firebase listeners + local notification display + deep-link dispatch
+- router layer: maps payload (`kind`, `conversation_id`, `notification_id`) to screens
+
+---
+
+## 14) Payload Mapping Used by Backend
+
+### Chat message push
+- `kind`: `chat_message`
+- `conversation_id`
+- `message_id`
+- `sender_id`
+
+### System notification push
+- `kind`: `system_notification`
+- `notification_id`
+- `type`
+- `priority`
+- `action_url` (optional)
 

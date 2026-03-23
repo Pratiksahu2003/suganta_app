@@ -19,6 +19,7 @@ use App\Support\ChatPlainText;
 use App\Traits\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
 
@@ -426,6 +427,12 @@ class MessageController extends Controller
 
     private function sendPushForNewMessage(int $conversationId, ChatMessage $message, int $senderId, string $senderName): void
     {
+        Log::channel('firebase_push')->info('chat.push.trigger.started', [
+            'conversation_id' => $conversationId,
+            'message_id' => $message->id,
+            'sender_id' => $senderId,
+        ]);
+
         $recipientIds = ChatConversationParticipant::query()
             ->where('conversation_id', $conversationId)
             ->whereNull('left_at')
@@ -435,12 +442,22 @@ class MessageController extends Controller
             ->values();
 
         if ($recipientIds->isEmpty()) {
+            Log::channel('firebase_push')->info('chat.push.trigger.skipped.no_recipients', [
+                'conversation_id' => $conversationId,
+                'message_id' => $message->id,
+            ]);
             return;
         }
 
         $recipients = User::query()->whereIn('id', $recipientIds->all())->get(['id', 'push_subscription']);
         $preview = Str::limit((string) $message->message, 120);
         $title = "New message from {$senderName}";
+        Log::channel('firebase_push')->info('chat.push.trigger.recipients_loaded', [
+            'conversation_id' => $conversationId,
+            'message_id' => $message->id,
+            'recipient_count' => $recipients->count(),
+            'recipient_ids' => $recipients->pluck('id')->values()->all(),
+        ]);
 
         foreach ($recipients as $recipient) {
             $this->firebasePushService->sendToUser($recipient, $title, $preview, [

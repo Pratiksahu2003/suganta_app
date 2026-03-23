@@ -8,6 +8,7 @@ use App\Services\FirebasePushService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 
 class NotificationController extends BaseApiController
 {
@@ -83,6 +84,13 @@ class NotificationController extends BaseApiController
             $validated['device_name'] ?? null
         );
 
+        Log::channel('firebase_push')->info('api.push_token.register.success', [
+            'user_id' => $user->id,
+            'platform' => $validated['platform'] ?? 'unknown',
+            'device_name' => $validated['device_name'] ?? null,
+            'token_hash' => substr(hash('sha256', $validated['token']), 0, 16),
+        ]);
+
         return $this->success('Push token registered successfully.', [
             'push_subscription' => $subscription,
         ]);
@@ -97,6 +105,11 @@ class NotificationController extends BaseApiController
         /** @var User $user */
         $user = Auth::user();
         $subscription = $this->firebasePushService->removeToken($user, $validated['token']);
+
+        Log::channel('firebase_push')->info('api.push_token.unregister.success', [
+            'user_id' => $user->id,
+            'token_hash' => substr(hash('sha256', $validated['token']), 0, 16),
+        ]);
 
         return $this->success('Push token removed successfully.', [
             'push_subscription' => $subscription,

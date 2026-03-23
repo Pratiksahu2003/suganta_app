@@ -66,6 +66,13 @@ return [
             'days' => 14,
         ],
 
+        'firebase_push' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/firebase_push.log'),
+            'level' => 'debug',
+            'days' => 14,
+        ],
+
         'stack' => [
             'driver' => 'stack',
             'channels' => explode(',', (string) env('LOG_STACK', 'single')),

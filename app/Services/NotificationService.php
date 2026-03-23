@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Notification;
 use App\Models\User;
+use Illuminate\Support\Facades\Log;
 
 class NotificationService
 {
@@ -23,6 +24,13 @@ class NotificationService
         ?string $actionUrl = null,
         string $priority = 'normal'
     ): Notification {
+        Log::channel('firebase_push')->info('notification.create.started', [
+            'user_id' => $userId,
+            'type' => $type,
+            'priority' => $priority,
+            'has_action_url' => $actionUrl !== null,
+        ]);
+
         $notification = Notification::create([
             'id' => \Illuminate\Support\Str::uuid(),
             'type' => 'App\Notifications\SystemNotification',
@@ -40,12 +48,22 @@ class NotificationService
 
         $user = User::query()->find($userId);
         if ($user !== null) {
+            Log::channel('firebase_push')->info('notification.push.triggered', [
+                'user_id' => $userId,
+                'notification_id' => (string) $notification->id,
+                'type' => $type,
+            ]);
             $this->firebasePushService->sendToUser($user, $title, $message, [
                 'kind' => 'system_notification',
                 'notification_id' => (string) $notification->id,
                 'type' => $type,
                 'priority' => $priority,
                 'action_url' => $actionUrl,
+            ]);
+        } else {
+            Log::channel('firebase_push')->warning('notification.push.skipped.user_not_found', [
+                'user_id' => $userId,
+                'notification_id' => (string) $notification->id,
             ]);
         }
 

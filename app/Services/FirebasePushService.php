@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\User;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Kreait\Firebase\Factory;
 use Kreait\Firebase\Messaging\CloudMessage;
 use Kreait\Firebase\Messaging\Notification;
@@ -13,11 +14,13 @@ use Throwable;
 class FirebasePushService
 {
     private const MAX_TOKENS_PER_USER = 20;
+    private const LOG_CHANNEL = 'firebase_push';
 
     public function registerToken(User $user, string $token, ?string $platform = null, ?string $deviceName = null): array
     {
         $subscription = $this->normalizeSubscription($user->push_subscription ?? []);
         $tokens = $subscription['firebase']['tokens'];
+        $beforeCount = count($tokens);
 
         $tokens = array_values(array_filter($tokens, static fn (array $item): bool => ($item['token'] ?? null) !== $token));
         $tokens[] = [
@@ -34,6 +37,14 @@ class FirebasePushService
         $subscription['firebase']['tokens'] = $tokens;
         $user->push_subscription = $subscription;
         $user->save();
+        $this->logInfo('push.token.registered', [
+            'user_id' => $user->id,
+            'platform' => $platform ?? 'unknown',
+            'device_name' => $deviceName,
+            'token_hash' => $this->tokenHash($token),
+            'tokens_before' => $beforeCount,
+            'tokens_after' => count($tokens),
+        ]);
 
         return $subscription;
     }
@@ -41,6 +52,7 @@ class FirebasePushService
     public function removeToken(User $user, string $token): array
     {
         $subscription = $this->normalizeSubscription($user->push_subscription ?? []);
+        $beforeCount = count($subscription['firebase']['tokens']);
         $subscription['firebase']['tokens'] = array_values(array_filter(
             $subscription['firebase']['tokens'],
             static fn (array $item): bool => ($item['token'] ?? null) !== $token
@@ -48,6 +60,12 @@ class FirebasePushService
 
         $user->push_subscription = $subscription;
         $user->save();
+        $this->logInfo('push.token.removed', [
+            'user_id' => $user->id,
+            'token_hash' => $this->tokenHash($token),
+            'tokens_before' => $beforeCount,
+            'tokens_after' => count($subscription['firebase']['tokens']),
+        ]);
 
         return $subscription;
     }
@@ -55,21 +73,70 @@ class FirebasePushService
     public function sendToUser(User $user, string $title, string $body, array $data = []): void
     {
         $tokens = $this->extractTokens($user);
-        if (count($tokens) === 0 || ! $this->isConfigured()) {
+        if (count($tokens) === 0) {
+            $this->logInfo('push.send.skipped.no_tokens', [
+                'user_id' => $user->id,
+                'title' => $title,
+                'kind' => $data['kind'] ?? null,
+            ]);
+            return;
+        }
+
+        if (! $this->isConfigured()) {
+            $this->logWarning('push.send.skipped.not_configured', [
+                'user_id' => $user->id,
+                'title' => $title,
+                'credentials' => $this->credentialsPath(),
+                'kind' => $data['kind'] ?? null,
+            ]);
             return;
         }
 
         try {
+            $this->logInfo('push.send.started', [
+                'user_id' => $user->id,
+                'title' => $title,
+                'kind' => $data['kind'] ?? null,
+                'token_count' => count($tokens),
+                'token_hashes' => array_map(fn (string $t): string => $this->tokenHash($t), $tokens),
+            ]);
+
             $messaging = $this->messaging();
             $message = CloudMessage::new()
                 ->withNotification(Notification::create($title, $body))
                 ->withData($this->normalizeData($data));
 
-            $messaging->sendMulticast($message, $tokens);
+            $report = $messaging->sendMulticast($message, $tokens);
+            $successes = method_exists($report, 'successes') ? count($report->successes()->getItems()) : null;
+            $failures = method_exists($report, 'failures') ? count($report->failures()->getItems()) : null;
+            $invalidTokens = method_exists($report, 'invalidTokens') ? $report->invalidTokens() : [];
+            $unknownTokens = method_exists($report, 'unknownTokens') ? $report->unknownTokens() : [];
+
+            $this->logInfo('push.send.completed', [
+                'user_id' => $user->id,
+                'title' => $title,
+                'kind' => $data['kind'] ?? null,
+                'token_count' => count($tokens),
+                'success_count' => $successes,
+                'failure_count' => $failures,
+                'invalid_token_hashes' => array_map(fn (string $t): string => $this->tokenHash($t), is_array($invalidTokens) ? $invalidTokens : []),
+                'unknown_token_hashes' => array_map(fn (string $t): string => $this->tokenHash($t), is_array($unknownTokens) ? $unknownTokens : []),
+            ]);
+
+            $staleTokens = array_values(array_unique(array_merge(
+                is_array($invalidTokens) ? $invalidTokens : [],
+                is_array($unknownTokens) ? $unknownTokens : []
+            )));
+            if ($staleTokens !== []) {
+                $this->removeManyTokens($user, $staleTokens);
+            }
         } catch (Throwable $e) {
-            Log::warning('Firebase push send failed', [
+            $this->logWarning('push.send.failed', [
                 'user_id' => $user->id,
                 'error' => $e->getMessage(),
+                'title' => $title,
+                'kind' => $data['kind'] ?? null,
+                'credentials' => $this->credentialsPath(),
             ]);
         }
     }
@@ -115,7 +182,16 @@ class FirebasePushService
 
     private function isConfigured(): bool
     {
-        return (bool) config('services.firebase.credentials');
+        $credentials = $this->credentialsPath();
+        if ($credentials === null || trim($credentials) === '') {
+            return false;
+        }
+
+        if (Str::startsWith(trim($credentials), '{')) {
+            return true;
+        }
+
+        return file_exists($credentials);
     }
 
     private function messaging()
@@ -129,5 +205,53 @@ class FirebasePushService
         }
 
         return $factory->createMessaging();
+    }
+
+    private function credentialsPath(): ?string
+    {
+        $credentials = config('services.firebase.credentials');
+        return is_string($credentials) ? $credentials : null;
+    }
+
+    private function removeManyTokens(User $user, array $tokens): void
+    {
+        $tokens = array_values(array_filter(array_unique($tokens), fn ($token): bool => is_string($token) && $token !== ''));
+        if ($tokens === []) {
+            return;
+        }
+
+        $subscription = $this->normalizeSubscription($user->push_subscription ?? []);
+        $beforeCount = count($subscription['firebase']['tokens']);
+        $lookup = array_fill_keys($tokens, true);
+        $subscription['firebase']['tokens'] = array_values(array_filter(
+            $subscription['firebase']['tokens'],
+            static fn (array $item): bool => ! isset($lookup[$item['token'] ?? ''])
+        ));
+
+        $user->push_subscription = $subscription;
+        $user->save();
+
+        $this->logInfo('push.token.auto_removed_stale', [
+            'user_id' => $user->id,
+            'removed_count' => count($tokens),
+            'tokens_before' => $beforeCount,
+            'tokens_after' => count($subscription['firebase']['tokens']),
+            'removed_token_hashes' => array_map(fn (string $t): string => $this->tokenHash($t), $tokens),
+        ]);
+    }
+
+    private function tokenHash(string $token): string
+    {
+        return substr(hash('sha256', $token), 0, 16);
+    }
+
+    private function logInfo(string $event, array $context = []): void
+    {
+        Log::channel(self::LOG_CHANNEL)->info($event, $context);
+    }
+
+    private function logWarning(string $event, array $context = []): void
+    {
+        Log::channel(self::LOG_CHANNEL)->warning($event, $context);
     }
 }
