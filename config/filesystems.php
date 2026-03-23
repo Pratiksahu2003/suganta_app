@@ -43,6 +43,18 @@ kets, signed URLs are used. This sets    | When using GCS with non-public buc
 
     /*
     |--------------------------------------------------------------------------
+    | GCS Signed URL Cache TTL (seconds)
+    |--------------------------------------------------------------------------
+    |
+    | Optional override for caching generated GCS signed URLs. Leave null/0
+    | to auto-calculate from expiry minutes (expiry - 60 seconds).
+    |
+    */
+
+    'gcs_signed_url_cache_seconds' => env('GCP_SIGNED_URL_CACHE_SECONDS', 0),
+
+    /*
+    |--------------------------------------------------------------------------
     | Filesystem Disks
     |--------------------------------------------------------------------------
     |

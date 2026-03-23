@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -21,8 +22,17 @@ function storage_file_url(?string $path = null, ?string $disk = null): string
     if ($disk === 'gcs') {
         $minutes = (int) config('filesystems.gcs_signed_url_expiry_minutes', 10080);
         $expiry = now()->addMinutes($minutes);
+        $expirySeconds = max(60, ((int) $minutes) * 60);
+        $fallbackCacheSeconds = max(60, $expirySeconds - 60);
+        $configuredCacheSeconds = (int) config('filesystems.gcs_signed_url_cache_seconds', 0);
+        $cacheSeconds = $configuredCacheSeconds > 0
+            ? min(max(60, $configuredCacheSeconds), $fallbackCacheSeconds)
+            : $fallbackCacheSeconds;
+        $cacheKey = 'storage_file_url:gcs:'.sha1($path);
 
-        return Storage::disk('gcs')->temporaryUrl($path, $expiry);
+        return Cache::remember($cacheKey, $cacheSeconds, static function () use ($path, $expiry): string {
+            return Storage::disk('gcs')->temporaryUrl($path, $expiry);
+        });
     }
 
     return Storage::disk($disk)->url($path);
