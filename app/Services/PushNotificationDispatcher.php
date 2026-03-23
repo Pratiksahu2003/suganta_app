@@ -36,6 +36,14 @@ class PushNotificationDispatcher
         $title = (string) ($data['title'] ?? 'New Notification');
         $body = (string) ($data['message'] ?? 'You have a new notification.');
 
+        if ($this->isAuthTokenRelatedNotification($title, $body, $data)) {
+            Log::channel('firebase_push')->info('push.dispatch.notification.skipped.auth_token_related', [
+                'notification_id' => (string) $notification->id,
+                'notifiable_id' => $notification->notifiable_id,
+            ]);
+            return;
+        }
+
         $this->firebasePushService->sendToUser($user, $title, $body, [
             'kind' => 'system_notification',
             'notification_id' => (string) $notification->id,
@@ -93,5 +101,37 @@ class PushNotificationDispatcher
     private function isChatEventEnabled(string $eventKey): bool
     {
         return (bool) config("push.chat.events.{$eventKey}", true);
+    }
+
+    private function isAuthTokenRelatedNotification(string $title, string $body, array $data): bool
+    {
+        $haystack = strtolower(implode(' ', [
+            $title,
+            $body,
+            json_encode($data, JSON_UNESCAPED_UNICODE) ?: '',
+        ]));
+
+        foreach ($this->authTokenKeywords() as $keyword) {
+            if (str_contains($haystack, $keyword)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function authTokenKeywords(): array
+    {
+        return [
+            'auth token',
+            'authentication token',
+            'access token',
+            'refresh token',
+            'bearer token',
+            'remember token',
+            'reset token',
+            'password reset token',
+            'api token',
+        ];
     }
 }
