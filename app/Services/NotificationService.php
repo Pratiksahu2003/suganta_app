@@ -104,4 +104,40 @@ class NotificationService
 
         return $created;
     }
+
+    /**
+     * Create notifications for all users.
+     *
+     * @return int Number of notifications created
+     */
+    public function createAllUsersNotification(
+        string $title,
+        string $message,
+        string $type = 'general',
+        array $data = [],
+        ?string $actionUrl = null,
+        string $priority = 'normal'
+    ): int {
+        $createdCount = 0;
+
+        User::query()
+            ->select('id')
+            ->orderBy('id')
+            ->chunkById(200, function ($users) use ($title, $message, $type, $data, $actionUrl, $priority, &$createdCount): void {
+                foreach ($users as $user) {
+                    $this->createUserNotification(
+                        (int) $user->id,
+                        $title,
+                        $message,
+                        $type,
+                        $data,
+                        $actionUrl,
+                        $priority
+                    );
+                    $createdCount++;
+                }
+            });
+
+        return $createdCount;
+    }
 }
