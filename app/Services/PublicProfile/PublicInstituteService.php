@@ -3,6 +3,7 @@
 namespace App\Services\PublicProfile;
 
 use App\Models\User;
+use App\Support\CacheVersion;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -103,8 +104,10 @@ class PublicInstituteService
 
     public function getRelatedInstitutes(User $user, int $limit = 4): array
     {
+        $version = CacheVersion::get('institutes_public');
+
         return Cache::remember(
-            "institute_related:{$user->id}",
+            "institute_related:v{$version}:{$user->id}",
             self::RELATED_CACHE_TTL,
             fn () => $this->queryRelatedInstitutes($user, $limit)->all()
         );
@@ -114,7 +117,8 @@ class PublicInstituteService
 
     public function getInstituteCities(int $limit = 50): array
     {
-        return Cache::remember('institute_cities_profile', 3600, function () use ($limit) {
+        $version = CacheVersion::get('institutes_public');
+        return Cache::remember("institute_cities_profile:v{$version}", 3600, function () use ($limit) {
             return User::whereIn('role', ['institute', 'university'])
                 ->whereNotNull('email_verified_at')
                 ->whereIn('registration_fee_status', ['paid', 'not_required'])

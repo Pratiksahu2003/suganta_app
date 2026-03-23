@@ -4,7 +4,9 @@ namespace App\Services;
 
 use App\Models\User;
 use App\Models\UserSession;
+use App\Support\CacheVersion;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Collection;
@@ -12,6 +14,9 @@ use Jenssegers\Agent\Agent;
 
 class SessionService
 {
+    private const GEOIP_CACHE_TTL_SECONDS = 86400;
+    private const SESSION_STATS_CACHE_TTL_SECONDS = 120;
+
     protected Agent $agent;
 
     public function __construct()
@@ -39,6 +44,7 @@ class SessionService
                 'last_activity' => now(),
                 'login_at' => now(),
             ]);
+            $this->forgetSessionStatsCache($user->id);
             return $existingSession;
         }
 
@@ -79,6 +85,7 @@ class SessionService
             'login_at' => now(),
             'device_fingerprint' => $this->generateDeviceFingerprint($request),
         ]);
+        $this->forgetSessionStatsCache($user->id);
 
         return $session;
     }
@@ -91,6 +98,7 @@ class SessionService
         $session->update([
             'last_activity' => now(),
         ]);
+        $this->forgetSessionStatsCache($session->user_id);
     }
 
     /**
@@ -103,6 +111,7 @@ class SessionService
             'is_current_session' => false,
             'logout_at' => now(),
         ]);
+        $this->forgetSessionStatsCache($session->user_id);
     }
 
     /**
@@ -117,6 +126,7 @@ class SessionService
                 'is_current_session' => false,
                 'logout_at' => now(),
             ]);
+        $this->forgetSessionStatsCache($user->id);
     }
 
     /**
@@ -132,6 +142,7 @@ class SessionService
                 'is_current_session' => false,
                 'logout_at' => now(),
             ]);
+        $this->forgetSessionStatsCache($user->id);
     }
 
     /**
@@ -218,47 +229,50 @@ class SessionService
             ];
         }
 
-        try {
-            // Use ipapi.co for location data (free tier available)
-            // Reduced timeout to 2 seconds to prevent long waits
-            $response = Http::timeout(2)->get("http://ip-api.com/json/{$ipAddress}");
-            
-            if ($response->successful()) {
-                $data = $response->json();
-                
-                if (($data['status'] ?? 'fail') === 'success') {
-                    return [
-                        'location' => implode(', ', array_filter([
-                            $data['city'] ?? null,
-                            $data['regionName'] ?? null,
-                            $data['country'] ?? null,
-                        ])),
-                        'city' => $data['city'] ?? null,
-                        'state' => $data['regionName'] ?? null,
-                        'country' => $data['country'] ?? null,
-                        'latitude' => $data['lat'] ?? null,
-                        'longitude' => $data['lon'] ?? null,
-                        'timezone' => $data['timezone'] ?? config('app.timezone'),
-                    ];
+        $cacheKey = "geoip:{$ipAddress}";
+
+        return Cache::remember($cacheKey, now()->addSeconds(self::GEOIP_CACHE_TTL_SECONDS), function () use ($ipAddress) {
+            try {
+                // Reduced timeout to 2 seconds to prevent long waits on external dependency.
+                $response = Http::timeout(2)->get("http://ip-api.com/json/{$ipAddress}");
+
+                if ($response->successful()) {
+                    $data = $response->json();
+
+                    if (($data['status'] ?? 'fail') === 'success') {
+                        return [
+                            'location' => implode(', ', array_filter([
+                                $data['city'] ?? null,
+                                $data['regionName'] ?? null,
+                                $data['country'] ?? null,
+                            ])),
+                            'city' => $data['city'] ?? null,
+                            'state' => $data['regionName'] ?? null,
+                            'country' => $data['country'] ?? null,
+                            'latitude' => $data['lat'] ?? null,
+                            'longitude' => $data['lon'] ?? null,
+                            'timezone' => $data['timezone'] ?? config('app.timezone'),
+                        ];
+                    }
+                }
+            } catch (\Exception $e) {
+                // Log error but don't fail
+                // Only log in debug mode to avoid cluttering production logs with timeout errors
+                if (config('app.debug')) {
+                    Log::warning('Failed to get location for IP: ' . $ipAddress, ['error' => $e->getMessage()]);
                 }
             }
-        } catch (\Exception $e) {
-            // Log error but don't fail
-            // Only log in debug mode to avoid cluttering production logs with timeout errors
-            if (config('app.debug')) {
-                Log::warning('Failed to get location for IP: ' . $ipAddress, ['error' => $e->getMessage()]);
-            }
-        }
 
-        return [
-            'location' => 'Unknown Location',
-            'city' => null,
-            'state' => null,
-            'country' => null,
-            'latitude' => null,
-            'longitude' => null,
-            'timezone' => config('app.timezone'),
-        ];
+            return [
+                'location' => 'Unknown Location',
+                'city' => null,
+                'state' => null,
+                'country' => null,
+                'latitude' => null,
+                'longitude' => null,
+                'timezone' => config('app.timezone'),
+            ];
+        });
     }
 
     /**
@@ -492,9 +506,11 @@ class SessionService
      */
     public function cleanupOldSessions(int $days = 30): int
     {
-        return UserSession::where('created_at', '<', now()->subDays($days))
+        $deleted = UserSession::where('created_at', '<', now()->subDays($days))
             ->where('is_active', false)
             ->delete();
+
+        return $deleted;
     }
 
     /**
@@ -502,65 +518,80 @@ class SessionService
      */
     public function getSessionStats(User $user): array
     {
-        $totalSessions = UserSession::where('user_id', $user->id)->count();
-        $activeSessions = UserSession::where('user_id', $user->id)
-            ->where('is_active', true)
-            ->count();
-        $currentSession = $this->getCurrentSession($user);
-        
-        // Get device type breakdown
-        $deviceStats = UserSession::where('user_id', $user->id)
-            ->where('is_active', true)
-            ->selectRaw('device_type, COUNT(*) as count')
-            ->groupBy('device_type')
-            ->get()
-            ->pluck('count', 'device_type')
-            ->toArray();
+        $cacheKey = $this->sessionStatsCacheKey($user->id);
 
-        // Get browser breakdown
-        $browserStats = UserSession::where('user_id', $user->id)
-            ->where('is_active', true)
-            ->selectRaw('browser, COUNT(*) as count')
-            ->groupBy('browser')
-            ->orderBy('count', 'desc')
-            ->get()
-            ->pluck('count', 'browser')
-            ->toArray();
+        return Cache::remember($cacheKey, now()->addSeconds(self::SESSION_STATS_CACHE_TTL_SECONDS), function () use ($user) {
+            $totalSessions = UserSession::where('user_id', $user->id)->count();
+            $activeSessions = UserSession::where('user_id', $user->id)
+                ->where('is_active', true)
+                ->count();
+            $currentSession = $this->getCurrentSession($user);
 
-        // Get location breakdown
-        $locationStats = UserSession::where('user_id', $user->id)
-            ->where('is_active', true)
-            ->selectRaw('country, COUNT(*) as count')
-            ->groupBy('country')
-            ->orderBy('count', 'desc')
-            ->get()
-            ->pluck('count', 'country')
-            ->toArray();
+            // Get device type breakdown
+            $deviceStats = UserSession::where('user_id', $user->id)
+                ->where('is_active', true)
+                ->selectRaw('device_type, COUNT(*) as count')
+                ->groupBy('device_type')
+                ->get()
+                ->pluck('count', 'device_type')
+                ->toArray();
 
-        // Get suspicious sessions count
-        $suspiciousSessions = UserSession::where('user_id', $user->id)
-            ->where('is_active', true)
-            ->get()
-            ->filter(function ($session) {
-                return $this->isSuspiciousSession($session);
-            })
-            ->count();
+            // Get browser breakdown
+            $browserStats = UserSession::where('user_id', $user->id)
+                ->where('is_active', true)
+                ->selectRaw('browser, COUNT(*) as count')
+                ->groupBy('browser')
+                ->orderBy('count', 'desc')
+                ->get()
+                ->pluck('count', 'browser')
+                ->toArray();
 
-        return [
-            'total_sessions' => $totalSessions,
-            'active_sessions' => $activeSessions,
-            'current_session' => $currentSession,
-            'last_login' => UserSession::where('user_id', $user->id)
-                ->orderBy('login_at', 'desc')
-                ->first()?->login_at,
-            'device_breakdown' => $deviceStats,
-            'browser_breakdown' => $browserStats,
-            'location_breakdown' => $locationStats,
-            'suspicious_sessions' => $suspiciousSessions,
-            'mobile_sessions' => $deviceStats['mobile'] ?? 0,
-            'desktop_sessions' => $deviceStats['desktop'] ?? 0,
-            'tablet_sessions' => $deviceStats['tablet'] ?? 0,
-            'laptop_sessions' => $deviceStats['laptop'] ?? 0,
-        ];
+            // Get location breakdown
+            $locationStats = UserSession::where('user_id', $user->id)
+                ->where('is_active', true)
+                ->selectRaw('country, COUNT(*) as count')
+                ->groupBy('country')
+                ->orderBy('count', 'desc')
+                ->get()
+                ->pluck('count', 'country')
+                ->toArray();
+
+            // Get suspicious sessions count
+            $suspiciousSessions = UserSession::where('user_id', $user->id)
+                ->where('is_active', true)
+                ->get()
+                ->filter(function ($session) {
+                    return $this->isSuspiciousSession($session);
+                })
+                ->count();
+
+            return [
+                'total_sessions' => $totalSessions,
+                'active_sessions' => $activeSessions,
+                'current_session' => $currentSession,
+                'last_login' => UserSession::where('user_id', $user->id)
+                    ->orderBy('login_at', 'desc')
+                    ->first()?->login_at,
+                'device_breakdown' => $deviceStats,
+                'browser_breakdown' => $browserStats,
+                'location_breakdown' => $locationStats,
+                'suspicious_sessions' => $suspiciousSessions,
+                'mobile_sessions' => $deviceStats['mobile'] ?? 0,
+                'desktop_sessions' => $deviceStats['desktop'] ?? 0,
+                'tablet_sessions' => $deviceStats['tablet'] ?? 0,
+                'laptop_sessions' => $deviceStats['laptop'] ?? 0,
+            ];
+        });
+    }
+
+    protected function sessionStatsCacheKey(int $userId): string
+    {
+        $version = CacheVersion::get("session_stats_user:{$userId}");
+        return "session:stats:user:v{$version}:{$userId}";
+    }
+
+    protected function forgetSessionStatsCache(int $userId): void
+    {
+        Cache::forget($this->sessionStatsCacheKey($userId));
     }
 } 

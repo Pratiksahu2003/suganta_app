@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Models\Subject;
+use App\Support\CacheVersion;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class SubjectController extends BaseApiController
 {
@@ -16,18 +18,21 @@ class SubjectController extends BaseApiController
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Subject::query()
-            ->select('id', 'name')
-            ->orderBy('name');
+        $search = trim((string) $request->query('search', ''));
+        $version = CacheVersion::get('subjects');
+        $cacheKey = "subjects:index:v{$version}:" . md5(strtolower($search));
 
-        if ($search = $request->query('search')) {
-            $search = trim($search);
+        $subjects = Cache::remember($cacheKey, now()->addMinutes(15), function () use ($search) {
+            $query = Subject::query()
+                ->select('id', 'name')
+                ->orderBy('name');
+
             if ($search !== '') {
                 $query->where('name', 'like', '%' . $search . '%');
             }
-        }
 
-        $subjects = $query->get();
+            return $query->get();
+        });
 
         return $this->success('Subjects retrieved successfully.', $subjects);
     }

@@ -6,11 +6,16 @@ use App\Helpers\FilterOptionsHelper;
 use App\Models\User;
 use App\Services\PublicProfile\PublicInstituteFormatter;
 use App\Services\PublicProfile\PublicInstituteService;
+use App\Support\CacheVersion;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class PublicInstituteController extends BaseApiController
 {
+    private const LIST_CACHE_TTL_SECONDS = 120;
+    private const SHOW_CACHE_TTL_SECONDS = 300;
+
     public function __construct(
         private PublicInstituteService $service,
         private PublicInstituteFormatter $formatter,
@@ -38,31 +43,44 @@ class PublicInstituteController extends BaseApiController
      */
     public function index(Request $request): JsonResponse
     {
-        $query   = $this->service->listQuery($request);
-        $perPage = min(max(1, (int) $request->query('per_page', 12)), 50);
+        $queryParams = $request->query();
+        ksort($queryParams);
+        $version = CacheVersion::get('institutes_public');
+        $cacheKey = "institutes:list:v{$version}:" . md5(json_encode($queryParams));
 
-        $paginator  = $query->paginate($perPage)->withQueryString();
-        $institutes = collect($paginator->items());
-        $usedFallback = false;
+        $payload = Cache::remember(
+            $cacheKey,
+            now()->addSeconds(self::LIST_CACHE_TTL_SECONDS),
+            function () use ($request) {
+                $query   = $this->service->listQuery($request);
+                $perPage = min(max(1, (int) $request->query('per_page', 12)), 50);
 
-        if ($institutes->isEmpty()) {
-            $institutes = $this->service
-                ->getFeaturedFallback($paginator->pluck('id')->all(), $perPage)
-                ->unique('id')
-                ->values();
-            $usedFallback = true;
-        }
+                $paginator  = $query->paginate($perPage)->withQueryString();
+                $institutes = collect($paginator->items());
+                $usedFallback = false;
 
-        $items = $institutes->map(fn (User $u) => $this->formatter->listItem($u));
+                if ($institutes->isEmpty()) {
+                    $institutes = $this->service
+                        ->getFeaturedFallback($paginator->pluck('id')->all(), $perPage)
+                        ->unique('id')
+                        ->values();
+                    $usedFallback = true;
+                }
 
-        $pagination = $usedFallback
-            ? FilterOptionsHelper::fallbackPaginationMeta($request, $perPage, $institutes->count())
-            : FilterOptionsHelper::paginationMeta($paginator);
+                $items = $institutes->map(fn (User $u) => $this->formatter->listItem($u));
 
-        return $this->success('Institutes retrieved successfully.', [
-            'institutes' => $items,
-            'pagination' => $pagination,
-        ]);
+                $pagination = $usedFallback
+                    ? FilterOptionsHelper::fallbackPaginationMeta($request, $perPage, $institutes->count())
+                    : FilterOptionsHelper::paginationMeta($paginator);
+
+                return [
+                    'institutes' => $items,
+                    'pagination' => $pagination,
+                ];
+            }
+        );
+
+        return $this->success('Institutes retrieved successfully.', $payload);
     }
 
     /**
@@ -70,20 +88,30 @@ class PublicInstituteController extends BaseApiController
      */
     public function show(int $id): JsonResponse
     {
-        $user = $this->service->findForShow($id);
+        $version = CacheVersion::get('institutes_public');
+        $cacheKey = "institutes:show:v{$version}:{$id}";
+        $payload = Cache::remember($cacheKey, now()->addSeconds(self::SHOW_CACHE_TTL_SECONDS), function () use ($id) {
+            $user = $this->service->findForShow($id);
 
-        if (!$user || !$user->profile) {
+            if (!$user || !$user->profile) {
+                return null;
+            }
+
+            $related = collect($this->service->getRelatedInstitutes($user))
+                ->map(fn (User $u) => $this->formatter->listItem($u))
+                ->all();
+
+            return [
+                ...$this->formatter->show($user),
+                'related_institutes' => $related,
+            ];
+        });
+
+        if ($payload === null) {
             return $this->notFound('Institute not found.');
         }
 
-        $related = collect($this->service->getRelatedInstitutes($user))
-            ->map(fn (User $u) => $this->formatter->listItem($u))
-            ->all();
-
-        return $this->success('Institute profile retrieved successfully.', [
-            ...$this->formatter->show($user),
-            'related_institutes' => $related,
-        ]);
+        return $this->success('Institute profile retrieved successfully.', $payload);
     }
 
     

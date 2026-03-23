@@ -10,6 +10,7 @@ use App\Services\AiAdviserService;
 use App\Traits\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
 class AiAdviserController extends Controller
@@ -97,18 +98,19 @@ class AiAdviserController extends Controller
     /**
      * Build a consistent conversation summary object for API responses.
      */
-    protected function formatConversationSummary(AiConversation $conversation): array
+    protected function formatConversationSummary(
+        AiConversation $conversation,
+        ?int $messageCount = null,
+        ?string $lastMessageContent = null
+    ): array
     {
-        $messageCount = $conversation->messages()->count();
-        $lastMessage = $conversation->messages()->latest()->first();
-
         return [
             'id' => $conversation->id,
             'subject' => $conversation->subject,
             'status' => $conversation->status,
-            'total_messages' => $messageCount,
-            'last_message_preview' => $lastMessage
-                ? Str::limit($lastMessage->content, 120)
+            'total_messages' => (int) ($messageCount ?? 0),
+            'last_message_preview' => $lastMessageContent
+                ? Str::limit($lastMessageContent, 120)
                 : null,
             'started_at' => $conversation->created_at?->toIso8601String(),
             'last_active_at' => $conversation->last_used_at
@@ -303,11 +305,19 @@ class AiAdviserController extends Controller
 
         $paginator = AiConversation::where('user_id', $user->id)
             ->where('purpose', 'ai_adviser')
+            ->withCount('messages')
             ->orderByDesc('last_used_at')
             ->paginate(15);
 
+        $conversationIds = collect($paginator->items())->pluck('id')->all();
+        $latestMessageByConversation = $this->latestMessageContentByConversationIds($conversationIds);
+
         $conversations = collect($paginator->items())->map(
-            fn (AiConversation $c) => $this->formatConversationSummary($c)
+            fn (AiConversation $c) => $this->formatConversationSummary(
+                $c,
+                (int) ($c->messages_count ?? 0),
+                $latestMessageByConversation->get($c->id)
+            )
         );
 
         return $this->success('AI adviser conversations fetched.', [
@@ -320,6 +330,22 @@ class AiAdviserController extends Controller
                 'has_more' => $paginator->hasMorePages(),
             ],
         ]);
+    }
+
+    protected function latestMessageContentByConversationIds(array $conversationIds): Collection
+    {
+        if (empty($conversationIds)) {
+            return collect();
+        }
+
+        return AiMessage::query()
+            ->select(['ai_conversation_id', 'content'])
+            ->whereIn('ai_conversation_id', $conversationIds)
+            ->orderBy('ai_conversation_id')
+            ->orderByDesc('created_at')
+            ->get()
+            ->unique('ai_conversation_id')
+            ->mapWithKeys(fn (AiMessage $message) => [$message->ai_conversation_id => $message->content]);
     }
 
     public function show(Request $request, AiConversation $aiConversation): JsonResponse

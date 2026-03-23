@@ -9,6 +9,7 @@ use App\Models\Profile;
 use App\Models\ProfileTeachingInfo;
 use App\Models\Subject;
 use App\Models\User;
+use App\Support\CacheVersion;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -20,6 +21,7 @@ class PublicTeacherController extends BaseApiController
     private const EXCLUDED_USER_ID = 40;
     private const ONLINE_TEACHING_MODE_EXCLUDE = 2; // Offline Only
     private const RELATED_TEACHERS_CACHE_TTL = 300; // 5 min
+    private const SUBJECTS_BY_IDS_CACHE_TTL = 600; // 10 min
 
     /**
      * Get filter options for teacher listing.
@@ -98,9 +100,10 @@ class PublicTeacherController extends BaseApiController
         $teachingInfo = $profile->teachingInfo;
 
         $subjects = $this->getSubjectsForProfile($profile, $teachingInfo);
+        $version = CacheVersion::get('teachers_public');
 
         $relatedTeachers = Cache::remember(
-            'teacher_show_related_' . $id,
+            "teacher_show_related:v{$version}:{$id}",
             self::RELATED_TEACHERS_CACHE_TTL,
             fn () => $this->getRelatedTeachers($profile)->map(fn (User $u) => $this->formatListItem($u))->all()
         );
@@ -301,7 +304,8 @@ class PublicTeacherController extends BaseApiController
 
     private function getTeacherCities(int $limit = 50): array
     {
-        return Cache::remember('teacher_cities_profile', 3600, function () use ($limit) {
+        $version = CacheVersion::get('teachers_public');
+        return Cache::remember("teacher_cities_profile:v{$version}", 3600, function () use ($limit) {
             return User::where('role', 'teacher')
                 ->whereNotNull('email_verified_at')
                 ->whereIn('registration_fee_status', ['paid', 'not_required'])
@@ -324,12 +328,21 @@ class PublicTeacherController extends BaseApiController
         if (is_string($ids)) {
             $ids = json_decode($ids, true) ?? [];
         }
+        $ids = array_values(array_unique(array_map('intval', (array) $ids)));
+        sort($ids);
+
         if (empty($ids)) {
             return [];
         }
-        return Subject::whereIn('id', $ids)->get(['id', 'name', 'slug', 'category'])
-            ->map(fn ($s) => ['id' => $s->id, 'name' => $s->name, 'slug' => $s->slug, 'category' => $s->category])
-            ->all();
+
+        $version = CacheVersion::get('subjects');
+        $cacheKey = "subjects:by_ids:v{$version}:" . md5(implode(',', $ids));
+
+        return Cache::remember($cacheKey, self::SUBJECTS_BY_IDS_CACHE_TTL, function () use ($ids) {
+            return Subject::whereIn('id', $ids)->get(['id', 'name', 'slug', 'category'])
+                ->map(fn ($s) => ['id' => $s->id, 'name' => $s->name, 'slug' => $s->slug, 'category' => $s->category])
+                ->all();
+        });
     }
 
     private function formatListItem(User $user): array

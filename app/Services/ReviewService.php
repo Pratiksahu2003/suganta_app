@@ -6,14 +6,18 @@ use App\Exceptions\DuplicateReviewException;
 use App\Exceptions\ReviewNotAllowedException;
 use App\Models\Review;
 use App\Models\User;
+use App\Support\CacheVersion;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 use InvalidArgumentException;
 
 class ReviewService
 {
+    private const ENTITY_STATS_CACHE_TTL_SECONDS = 300;
+
     protected array $reviewableMap = [
         'user' => User::class,
     ];
@@ -59,6 +63,10 @@ class ReviewService
             $review->save();
 
             $review->load(['user', 'reviewable']);
+            $this->forgetEntityStatsCache(
+                $data['reviewable_type'],
+                (int) $data['reviewable_id']
+            );
 
             return $review;
         });
@@ -84,6 +92,7 @@ class ReviewService
 
             $review->save();
             $review->load(['user', 'reviewable']);
+            $this->forgetEntityStatsCacheByReview($review);
 
             return $review;
         });
@@ -93,6 +102,7 @@ class ReviewService
     {
         $this->authorizeOwnership($review, $user);
 
+        $this->forgetEntityStatsCacheByReview($review);
         $review->delete();
     }
 
@@ -127,49 +137,57 @@ class ReviewService
 
     public function getEntityStats(string $type, int $id): array
     {
-        $reviewable = $this->resolveReviewable($type, $id);
-        $morphClass = get_class($reviewable);
+        $cacheKey = $this->entityStatsCacheKey($type, $id);
 
-        $stats = Review::where('reviewable_type', $morphClass)
-            ->where('reviewable_id', $reviewable->id)
-            ->published()
-            ->selectRaw('
-                COUNT(*) as total_reviews,
-                COALESCE(AVG(rating), 0) as average_rating,
-                COUNT(CASE WHEN is_verified = 1 THEN 1 END) as verified_count,
-                SUM(helpful_count) as total_helpful
-            ')
-            ->first();
+        return Cache::remember(
+            $cacheKey,
+            now()->addSeconds(self::ENTITY_STATS_CACHE_TTL_SECONDS),
+            function () use ($type, $id) {
+                $reviewable = $this->resolveReviewable($type, $id);
+                $morphClass = get_class($reviewable);
 
-        $distribution = Review::where('reviewable_type', $morphClass)
-            ->where('reviewable_id', $reviewable->id)
-            ->published()
-            ->selectRaw('rating, COUNT(*) as count')
-            ->groupBy('rating')
-            ->orderBy('rating', 'desc')
-            ->pluck('count', 'rating')
-            ->toArray();
+                $stats = Review::where('reviewable_type', $morphClass)
+                    ->where('reviewable_id', $reviewable->id)
+                    ->published()
+                    ->selectRaw('
+                        COUNT(*) as total_reviews,
+                        COALESCE(AVG(rating), 0) as average_rating,
+                        COUNT(CASE WHEN is_verified = 1 THEN 1 END) as verified_count,
+                        SUM(helpful_count) as total_helpful
+                    ')
+                    ->first();
 
-        $fullDistribution = [];
-        for ($i = 5; $i >= 1; $i--) {
-            $count = $distribution[$i] ?? 0;
-            $percentage = $stats->total_reviews > 0
-                ? round(($count / $stats->total_reviews) * 100, 1)
-                : 0;
-            $fullDistribution[] = [
-                'rating' => $i,
-                'count' => $count,
-                'percentage' => $percentage,
-            ];
-        }
+                $distribution = Review::where('reviewable_type', $morphClass)
+                    ->where('reviewable_id', $reviewable->id)
+                    ->published()
+                    ->selectRaw('rating, COUNT(*) as count')
+                    ->groupBy('rating')
+                    ->orderBy('rating', 'desc')
+                    ->pluck('count', 'rating')
+                    ->toArray();
 
-        return [
-            'total_reviews' => (int) $stats->total_reviews,
-            'average_rating' => round((float) $stats->average_rating, 1),
-            'verified_count' => (int) $stats->verified_count,
-            'total_helpful' => (int) ($stats->total_helpful ?? 0),
-            'distribution' => $fullDistribution,
-        ];
+                $fullDistribution = [];
+                for ($i = 5; $i >= 1; $i--) {
+                    $count = $distribution[$i] ?? 0;
+                    $percentage = $stats->total_reviews > 0
+                        ? round(($count / $stats->total_reviews) * 100, 1)
+                        : 0;
+                    $fullDistribution[] = [
+                        'rating' => $i,
+                        'count' => $count,
+                        'percentage' => $percentage,
+                    ];
+                }
+
+                return [
+                    'total_reviews' => (int) $stats->total_reviews,
+                    'average_rating' => round((float) $stats->average_rating, 1),
+                    'verified_count' => (int) $stats->verified_count,
+                    'total_helpful' => (int) ($stats->total_helpful ?? 0),
+                    'distribution' => $fullDistribution,
+                ];
+            }
+        );
     }
 
     public function markHelpful(Review $review, User $user): Review
@@ -182,6 +200,7 @@ class ReviewService
 
         $review->increment('helpful_count');
         $review->refresh();
+        $this->forgetEntityStatsCacheByReview($review);
 
         return $review;
     }
@@ -192,6 +211,7 @@ class ReviewService
         $review->replied_at = now();
         $review->save();
         $review->load(['user', 'reviewable']);
+        $this->forgetEntityStatsCacheByReview($review);
 
         return $review;
     }
@@ -265,5 +285,28 @@ class ReviewService
             'helpful' => $query->orderBy('helpful_count', 'desc')->latest(),
             default => $query->latest(),
         };
+    }
+
+    protected function entityStatsCacheKey(string $type, int $id): string
+    {
+        $version = CacheVersion::get('reviews_public');
+        return "reviews:stats:v{$version}:{$type}:{$id}";
+    }
+
+    protected function forgetEntityStatsCache(string $type, int $id): void
+    {
+        Cache::forget($this->entityStatsCacheKey($type, $id));
+    }
+
+    protected function forgetEntityStatsCacheByReview(Review $review): void
+    {
+        $type = match ($review->reviewable_type) {
+            User::class => 'user',
+            default => null,
+        };
+
+        if ($type !== null) {
+            $this->forgetEntityStatsCache($type, (int) $review->reviewable_id);
+        }
     }
 }
