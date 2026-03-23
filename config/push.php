@@ -5,6 +5,34 @@ return [
 
     'notifications' => [
         'enabled' => env('PUSH_NOTIFICATIONS_ENABLED', true),
+        'smart_filter' => [
+            // Only meaningful notifications should become push alerts.
+            'enabled' => true,
+            'min_priority' => 'high',
+            // Prevent burst spam for the same user/type/content.
+            'dedupe_seconds' => 120,
+            'always_allow_types' => [
+                'payment',
+                'booking',
+                'support',
+                'donation',
+                'subscription',
+                'lead',
+                'warning',
+                'success',
+                'message',
+            ],
+            // Model activity pushes only for these models (extra safety layer).
+            'model_push_models' => [
+                \App\Models\Payment::class,
+                \App\Models\Booking::class,
+                \App\Models\SupportTicket::class,
+                \App\Models\SupportTicketReply::class,
+                \App\Models\Donation::class,
+                \App\Models\UserSubscription::class,
+                \App\Models\Lead::class,
+            ],
+        ],
     ],
 
     'chat' => [
@@ -22,10 +50,40 @@ return [
     'model_activity' => [
         'enabled' => env('PUSH_MODEL_ACTIVITY_ENABLED', true),
         'send_to_all' => env('PUSH_MODEL_ACTIVITY_SEND_TO_ALL', true),
+        'cooldown_seconds' => (int) env('PUSH_MODEL_ACTIVITY_COOLDOWN_SECONDS', 120),
         'roles' => array_values(array_filter(array_map(
             static fn (string $role): string => trim($role),
             explode(',', (string) env('PUSH_MODEL_ACTIVITY_ROLES', 'admin,super-admin'))
         ))),
+        // Only these model events are considered for broadcast-worthy activity.
+        'important_models' => [
+            'created' => [
+                \App\Models\Payment::class,
+                \App\Models\Booking::class,
+                \App\Models\SupportTicket::class,
+                \App\Models\SupportTicketReply::class,
+                \App\Models\Donation::class,
+                \App\Models\UserSubscription::class,
+            ],
+            'updated' => [
+                \App\Models\Payment::class,
+                \App\Models\Booking::class,
+                \App\Models\SupportTicket::class,
+                \App\Models\SupportTicketReply::class,
+                \App\Models\Donation::class,
+                \App\Models\UserSubscription::class,
+                \App\Models\Lead::class,
+            ],
+        ],
+        // For updates, at least one field in this list must change.
+        'important_update_fields' => [
+            '*' => ['status', 'state', 'verification_status', 'is_active', 'approved_at', 'rejected_at', 'closed_at', 'expires_at', 'amount'],
+            \App\Models\Payment::class => ['status', 'amount', 'paid_at'],
+            \App\Models\Booking::class => ['status', 'scheduled_at', 'cancelled_at'],
+            \App\Models\SupportTicket::class => ['status', 'priority', 'assigned_to', 'resolved_at', 'closed_at'],
+            \App\Models\UserSubscription::class => ['status', 'expires_at', 'started_at'],
+            \App\Models\Lead::class => ['status', 'assigned_to', 'priority'],
+        ],
         'ignored_fields' => [
             'updated_at',
             'last_activity',

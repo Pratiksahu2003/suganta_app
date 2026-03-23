@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Chat\ChatConversationParticipant;
 use App\Models\Notification;
 use App\Models\User;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class PushNotificationDispatcher
@@ -36,10 +37,12 @@ class PushNotificationDispatcher
         $title = (string) ($data['title'] ?? 'New Notification');
         $body = (string) ($data['message'] ?? 'You have a new notification.');
 
-        if ($this->isAuthTokenRelatedNotification($title, $body, $data)) {
-            Log::channel('firebase_push')->info('push.dispatch.notification.skipped.auth_token_related', [
+        $decision = $this->pushDecision($notification, $title, $body, $data);
+        if (! $decision['send']) {
+            Log::channel('firebase_push')->info('push.dispatch.notification.skipped.smart_filter', [
                 'notification_id' => (string) $notification->id,
                 'notifiable_id' => $notification->notifiable_id,
+                'reason' => $decision['reason'],
             ]);
             return;
         }
@@ -103,16 +106,85 @@ class PushNotificationDispatcher
         return (bool) config("push.chat.events.{$eventKey}", true);
     }
 
+    /**
+     * @return array{send: bool, reason: string}
+     */
+    private function pushDecision(Notification $notification, string $title, string $body, array $data): array
+    {
+        if ($this->isAuthTokenRelatedNotification($title, $body, $data)) {
+            return ['send' => false, 'reason' => 'auth_or_token_related'];
+        }
+
+        if (! (bool) config('push.notifications.smart_filter.enabled', true)) {
+            return ['send' => true, 'reason' => 'smart_filter_disabled'];
+        }
+
+        $type = strtolower((string) ($data['type'] ?? 'general'));
+        $priority = strtolower((string) ($data['priority'] ?? 'normal'));
+
+        $alwaysAllowTypes = config('push.notifications.smart_filter.always_allow_types', []);
+        if (is_array($alwaysAllowTypes) && in_array($type, array_map('strtolower', $alwaysAllowTypes), true)) {
+            if ($this->isDuplicateWithinWindow($notification, $title, $body, $type, $data)) {
+                return ['send' => false, 'reason' => 'duplicate_within_window'];
+            }
+
+            return ['send' => true, 'reason' => 'always_allow_type'];
+        }
+
+        if ($this->isImportantModelActivity($data)) {
+            if ($this->isDuplicateWithinWindow($notification, $title, $body, $type, $data)) {
+                return ['send' => false, 'reason' => 'duplicate_within_window'];
+            }
+
+            return ['send' => true, 'reason' => 'important_model_activity'];
+        }
+
+        $minPriority = strtolower((string) config('push.notifications.smart_filter.min_priority', 'high'));
+        if ($this->priorityRank($priority) < $this->priorityRank($minPriority)) {
+            return ['send' => false, 'reason' => 'below_min_priority'];
+        }
+
+        if ($this->isDuplicateWithinWindow($notification, $title, $body, $type, $data)) {
+            return ['send' => false, 'reason' => 'duplicate_within_window'];
+        }
+
+        return ['send' => true, 'reason' => 'priority_threshold_met'];
+    }
+
+    private function isImportantModelActivity(array $data): bool
+    {
+        if (! isset($data['event'], $data['model'])) {
+            return false;
+        }
+
+        $modelPushModels = config('push.notifications.smart_filter.model_push_models', []);
+        if (! is_array($modelPushModels) || $modelPushModels === []) {
+            return false;
+        }
+
+        return in_array((string) $data['model'], $modelPushModels, true);
+    }
+
+    private function priorityRank(string $priority): int
+    {
+        return match (strtolower($priority)) {
+            'urgent' => 3,
+            'high' => 2,
+            'normal' => 1,
+            default => 0,
+        };
+    }
+
     private function isAuthTokenRelatedNotification(string $title, string $body, array $data): bool
     {
-        $haystack = strtolower(implode(' ', [
+        $haystack = implode(' ', [
             $title,
             $body,
             json_encode($data, JSON_UNESCAPED_UNICODE) ?: '',
-        ]));
+        ]);
 
-        foreach ($this->authTokenKeywords() as $keyword) {
-            if (str_contains($haystack, $keyword)) {
+        foreach ($this->authTokenPatterns() as $pattern) {
+            if (preg_match($pattern, $haystack) === 1) {
                 return true;
             }
         }
@@ -120,39 +192,53 @@ class PushNotificationDispatcher
         return false;
     }
 
-    private function authTokenKeywords(): array
+    private function authTokenPatterns(): array
     {
         return [
-            'auth token',
-            'authentication token',
-            'access token',
-            'api access token',
-            'api token',
-            'refresh token',
-            'bearer token',
-            'remember token',
-            'reset token',
-            'password reset token',
-            'password reset',
-            'reset password',
-            'forgot password',
-            'verification code',
-            'email verification',
-            'verify email',
-            'one time password',
-            'otp',
-            'two factor',
-            '2fa',
-            'sanctum',
-            'personal access token',
-            'login',
-            'logout',
-            'sign in',
-            'sign out',
-            'auth',
-            'authentication',
-            'authorized device',
-            'security alert',
+            '/\bauth(?:entication)?\s*token\b/i',
+            '/\b(access|refresh|bearer|remember|reset)\s*token\b/i',
+            '/\bapi\s*access\s*token\b/i',
+            '/\bpersonal\s*access\s*token\b/i',
+            '/\bsanctum\b/i',
+            '/\bpassword\s*reset\b/i',
+            '/\breset\s*password\b/i',
+            '/\bforgot\s*password\b/i',
+            '/\b(email\s*)?verification\s*code\b/i',
+            '/\bverify\s*email\b/i',
+            '/\bone\s*time\s*password\b/i',
+            '/\botp\b/i',
+            '/\btwo\s*factor\b/i',
+            '/\b2fa\b/i',
+            '/\blog(in|out)\b/i',
+            '/\bsign\s*(in|out)\b/i',
         ];
+    }
+
+    private function isDuplicateWithinWindow(
+        Notification $notification,
+        string $title,
+        string $body,
+        string $type,
+        array $data
+    ): bool {
+        $seconds = max(0, (int) config('push.notifications.smart_filter.dedupe_seconds', 120));
+        if ($seconds === 0) {
+            return false;
+        }
+
+        $fingerprint = implode('|', [
+            (string) $notification->notifiable_id,
+            $type,
+            strtolower(trim($title)),
+            strtolower(trim($body)),
+            strtolower((string) ($data['event'] ?? '')),
+            strtolower((string) ($data['model'] ?? '')),
+            (string) ($data['model_id'] ?? ''),
+        ]);
+
+        $key = 'push:dedupe:' . sha1($fingerprint);
+
+        // add returns false when key already exists in window.
+        return ! Cache::add($key, 1, $seconds);
     }
 }

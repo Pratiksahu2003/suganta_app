@@ -6,6 +6,7 @@ use App\Models\Notification;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Throwable;
 
 class ModelActivityNotificationService
@@ -20,7 +21,7 @@ class ModelActivityNotificationService
 
     public function onCreated(Model $model): void
     {
-        if (! $this->shouldNotifyFor($model)) {
+        if (! $this->shouldNotifyFor($model) || ! $this->isImportantModelForEvent($model, 'created')) {
             return;
         }
 
@@ -28,6 +29,10 @@ class ModelActivityNotificationService
         $actorName = $actor?->name ?? 'System';
         $modelLabel = class_basename($model);
         $modelKey = $model->getKey();
+
+        if ($this->isInCooldown($model, 'created')) {
+            return;
+        }
 
         $this->notifyUsersBasedOnMode(
             title: "{$modelLabel} created",
@@ -44,7 +49,7 @@ class ModelActivityNotificationService
 
     public function onUpdated(Model $model): void
     {
-        if (! $this->shouldNotifyFor($model)) {
+        if (! $this->shouldNotifyFor($model) || ! $this->isImportantModelForEvent($model, 'updated')) {
             return;
         }
 
@@ -61,10 +66,18 @@ class ModelActivityNotificationService
             return;
         }
 
+        if (! $this->hasImportantUpdateFieldChange($model, $changedFields)) {
+            return;
+        }
+
         $actor = Auth::user();
         $actorName = $actor?->name ?? 'System';
         $modelLabel = class_basename($model);
         $modelKey = $model->getKey();
+
+        if ($this->isInCooldown($model, 'updated')) {
+            return;
+        }
 
         $this->notifyUsersBasedOnMode(
             title: "{$modelLabel} updated",
@@ -114,6 +127,52 @@ class ModelActivityNotificationService
             : [];
 
         return in_array($field, $modelIgnoredFields, true);
+    }
+
+    private function isImportantModelForEvent(Model $model, string $event): bool
+    {
+        $configured = config("push.model_activity.important_models.{$event}", []);
+        if (! is_array($configured) || $configured === []) {
+            return false;
+        }
+
+        return in_array(get_class($model), $configured, true);
+    }
+
+    private function hasImportantUpdateFieldChange(Model $model, array $changedFields): bool
+    {
+        $map = config('push.model_activity.important_update_fields', []);
+        if (! is_array($map) || $map === []) {
+            return true;
+        }
+
+        $globalFields = is_array($map['*'] ?? null) ? $map['*'] : [];
+        $modelFields = is_array($map[get_class($model)] ?? null) ? $map[get_class($model)] : [];
+        $importantFields = array_values(array_unique(array_merge($globalFields, $modelFields)));
+
+        if ($importantFields === []) {
+            return true;
+        }
+
+        return count(array_intersect($changedFields, $importantFields)) > 0;
+    }
+
+    private function isInCooldown(Model $model, string $event): bool
+    {
+        $seconds = max(0, (int) config('push.model_activity.cooldown_seconds', 120));
+        if ($seconds <= 0) {
+            return false;
+        }
+
+        $key = sprintf(
+            'push:model-activity:%s:%s:%s',
+            $event,
+            get_class($model),
+            (string) ($model->getKey() ?? 'na')
+        );
+
+        // add() returns false when key already exists (still in cooldown window).
+        return ! Cache::add($key, now()->timestamp, $seconds);
     }
 
     private function notifyUsersBasedOnMode(string $title, string $message, array $data): void
