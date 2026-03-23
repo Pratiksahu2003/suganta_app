@@ -11,6 +11,23 @@ return [
             'min_priority' => 'high',
             // Prevent burst spam for the same user/type/content.
             'dedupe_seconds' => 120,
+            // Additional per-user/type pacing.
+            'default_rate_limit_seconds' => 180,
+            'rate_limit_seconds_by_type' => [
+                'message' => 30,
+                'support' => 120,
+                'payment' => 30,
+                'booking' => 60,
+                'subscription' => 120,
+                'lead' => 180,
+            ],
+            // Local quiet hours (uses user timezone if available in preferences.timezone).
+            'quiet_hours' => [
+                'enabled' => true,
+                'start_hour' => 22,
+                'end_hour' => 7,
+                'bypass_priorities' => ['urgent'],
+            ],
             'always_allow_types' => [
                 'payment',
                 'booking',
