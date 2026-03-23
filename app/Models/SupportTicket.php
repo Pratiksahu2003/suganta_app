@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\FlushesDashboardCache;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -11,7 +12,7 @@ use App\Traits\HasActivityNotifications;
 
 class SupportTicket extends Model
 {
-    use HasFactory, SoftDeletes, HasActivityNotifications;
+    use FlushesDashboardCache, HasActivityNotifications, HasFactory, SoftDeletes;
 
     protected $fillable = [
         'user_id',
@@ -74,6 +75,18 @@ class SupportTicket extends Model
             if (empty($ticket->ticket_number)) {
                 $ticket->ticket_number = self::generateTicketNumber();
             }
+        });
+
+        static::saved(function (self $ticket): void {
+            static::flushDashboardCacheForUser($ticket->user_id);
+        });
+
+        static::deleted(function (self $ticket): void {
+            static::flushDashboardCacheForUser($ticket->user_id);
+        });
+
+        static::restored(function (self $ticket): void {
+            static::flushDashboardCacheForUser($ticket->user_id);
         });
     }
 

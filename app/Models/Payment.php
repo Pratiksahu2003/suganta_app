@@ -2,12 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\FlushesDashboardCache;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
 class Payment extends Model
 {
-    use HasFactory;
+    use FlushesDashboardCache, HasFactory;
 
     protected $fillable = [
         'order_id',
@@ -47,5 +48,16 @@ class Payment extends Model
     public function notePurchase()
     {
         return $this->hasOne(NotePurchase::class);
+    }
+
+    protected static function booted(): void
+    {
+        static::saved(function (self $payment): void {
+            static::flushDashboardCacheForUser($payment->user_id);
+        });
+
+        static::deleted(function (self $payment): void {
+            static::flushDashboardCacheForUser($payment->user_id);
+        });
     }
 }

@@ -6,6 +6,7 @@ use App\Events\Chat\MessageRead;
 use App\Events\Chat\MessageSent;
 use App\Events\Chat\ReactionUpdated;
 use App\Events\Chat\UserTyping;
+use App\Http\Controllers\Api\V3\Chat\Concerns\InteractsWithChatCache;
 use App\Http\Controllers\Controller;
 use App\Models\Chat\ChatConversation;
 use App\Models\Chat\ChatConversationParticipant;
@@ -20,7 +21,7 @@ use Illuminate\Support\Facades\DB;
 
 class MessageController extends Controller
 {
-    use ApiResponse;
+    use ApiResponse, InteractsWithChatCache;
 
     public function index(Request $request, int $conversation): JsonResponse
     {
@@ -37,27 +38,40 @@ class MessageController extends Controller
         }
 
         $perPage = (int) $request->query('per_page', 50);
+        $beforeId = $request->filled('before_id') ? (int) $request->query('before_id') : null;
+        $page = max(1, (int) $request->query('page', 1));
+        $conversationVersion = $this->chatConversationVersion($chat->id);
+        $userVersion = $this->chatUserVersion($auth->id);
+        $cacheKey = 'chat:v3:messages:index:'.$chat->id.':'.$auth->id.':'.$conversationVersion.':'.$userVersion.':'.sha1(json_encode([
+            'before_id' => $beforeId,
+            'per_page' => $perPage,
+            'page' => $page,
+        ], JSON_UNESCAPED_UNICODE));
 
-        $messages = ChatMessage::query()
-            ->where('conversation_id', $chat->id)
-            ->whereNull('deleted_at')
-            ->when($request->filled('before_id'), function ($q) use ($request): void {
-                $q->where('id', '<', (int) $request->query('before_id'));
-            })
-            ->with([
-                'reactions',
-                'reads',
-                'replyTo' => static function ($query): void {
-                    $query->select(['id', 'conversation_id', 'sender_id', 'message', 'created_at', 'deleted_at']);
-                },
-            ])
-            ->orderByDesc('id')
-            ->paginate($perPage);
+        $payload = \Illuminate\Support\Facades\Cache::remember($cacheKey, $this->chatCacheTtlSeconds(), function () use ($chat, $request, $perPage, $auth) {
+            $messages = ChatMessage::query()
+                ->where('conversation_id', $chat->id)
+                ->whereNull('deleted_at')
+                ->when($request->filled('before_id'), function ($q) use ($request): void {
+                    $q->where('id', '<', (int) $request->query('before_id'));
+                })
+                ->with([
+                    'reactions',
+                    'reads',
+                    'replyTo' => static function ($query): void {
+                        $query->select(['id', 'conversation_id', 'sender_id', 'message', 'created_at', 'deleted_at']);
+                    },
+                ])
+                ->orderByDesc('id')
+                ->paginate($perPage);
 
-        $viewerId = $auth->id;
-        $messages->through(fn (ChatMessage $m) => $this->serializeChatMessage($m, $viewerId));
+            $viewerId = $auth->id;
+            $messages->through(fn (ChatMessage $m) => $this->serializeChatMessage($m, $viewerId));
 
-        return $this->success('Messages fetched successfully.', $messages);
+            return $messages->toArray();
+        });
+
+        return $this->success('Messages fetched successfully.', $payload);
     }
 
     public function store(Request $request, int $conversation): JsonResponse
@@ -107,6 +121,7 @@ class MessageController extends Controller
 
             return $message;
         });
+        $this->flushConversationReadCaches($chat->id, [$auth->id]);
 
         broadcast(new MessageSent($message))->toOthers();
 
@@ -148,6 +163,7 @@ class MessageController extends Controller
             'is_edited' => true,
             'edited_at' => now(),
         ]);
+        $this->flushConversationReadCaches($chatMessage->conversation_id, [$auth->id]);
 
         $fresh = $chatMessage->fresh()->load([
             'reactions',
@@ -178,6 +194,7 @@ class MessageController extends Controller
         }
 
         $chatMessage->update(['deleted_at' => now()]);
+        $this->flushConversationReadCaches($chatMessage->conversation_id, [$auth->id]);
 
         return $this->success('Message deleted successfully.');
     }
@@ -212,6 +229,7 @@ class MessageController extends Controller
                 $participant->save();
             }
         }
+        $this->flushConversationReadCaches($chatMessage->conversation_id, [$auth->id]);
 
         broadcast(new MessageRead(
             $chatMessage->conversation_id,
@@ -253,6 +271,7 @@ class MessageController extends Controller
             ['message_id' => $chatMessage->id, 'user_id' => $auth->id],
             ['reaction' => $validated['reaction']]
         );
+        $this->flushConversationReadCaches($chatMessage->conversation_id, [$auth->id]);
 
         broadcast(new ReactionUpdated(
             $chatMessage->conversation_id,
@@ -280,6 +299,7 @@ class MessageController extends Controller
         ChatMessageReaction::where('message_id', $chatMessage->id)
             ->where('user_id', $auth->id)
             ->delete();
+        $this->flushConversationReadCaches($chatMessage->conversation_id, [$auth->id]);
 
         broadcast(new ReactionUpdated(
             $chatMessage->conversation_id,

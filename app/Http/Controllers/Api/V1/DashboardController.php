@@ -10,6 +10,7 @@ use App\Models\SupportTicket;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -25,63 +26,73 @@ class DashboardController extends BaseApiController
         /** @var User $user */
         $user = Auth::user();
 
-        // Counts for auth user only
-        $supportTicketsCount = SupportTicket::query()
-            ->where('user_id', $user->id)
-            ->count();
+        $cacheKey = 'dashboard:v1:user:'.$user->id;
+        $payload = Cache::remember($cacheKey, $this->dashboardCacheTtlSeconds(), function () use ($user) {
+            // Counts for auth user only
+            $supportTicketsCount = SupportTicket::query()
+                ->where('user_id', $user->id)
+                ->count();
 
-        $paymentsCount = Payment::query()
-            ->where('user_id', $user->id)
-            ->count();
+            $paymentsCount = Payment::query()
+                ->where('user_id', $user->id)
+                ->count();
 
-        $leadsCount = Lead::query()
-            ->forAuthUser($user->id)
-            ->count();
+            $leadsCount = Lead::query()
+                ->forAuthUser($user->id)
+                ->count();
 
-        $studyRequirementsCount = StudyRequirement::query()
-            ->where('user_id', $user->id)
-            ->count();
+            $studyRequirementsCount = StudyRequirement::query()
+                ->where('user_id', $user->id)
+                ->count();
 
-        // Last 5 payments for auth user
-        $recentPayments = Payment::query()
-            ->where('user_id', $user->id)
-            ->orderByDesc('created_at')
-            ->limit(5)
-            ->get()
-            ->map(fn (Payment $p) => $this->formatPayment($p));
+            // Last 5 payments for auth user
+            $recentPayments = Payment::query()
+                ->where('user_id', $user->id)
+                ->orderByDesc('created_at')
+                ->limit(5)
+                ->get()
+                ->map(fn (Payment $p) => $this->formatPayment($p));
 
-        // Latest 5 leads for auth user (owned, assigned, or created)
-        $recentLeads = Lead::query()
-            ->forAuthUser($user->id)
-            ->orderByDesc('created_at')
-            ->limit(5)
-            ->get()
-            ->map(fn (Lead $l) => $this->formatLead($l));
+            // Latest 5 leads for auth user (owned, assigned, or created)
+            $recentLeads = Lead::query()
+                ->forAuthUser($user->id)
+                ->orderByDesc('created_at')
+                ->limit(5)
+                ->get()
+                ->map(fn (Lead $l) => $this->formatLead($l));
 
-        // 10 latest notifications for auth user
-        $notifications = Notification::query()
-            ->where('notifiable_type', User::class)
-            ->where('notifiable_id', $user->id)
-            ->orderByDesc('created_at')
-            ->limit(10)
-            ->get()
-            ->map(fn (Notification $n) => $this->formatNotification($n));
+            // 10 latest notifications for auth user
+            $notifications = Notification::query()
+                ->where('notifiable_type', User::class)
+                ->where('notifiable_id', $user->id)
+                ->orderByDesc('created_at')
+                ->limit(10)
+                ->get()
+                ->map(fn (Notification $n) => $this->formatNotification($n));
 
-        // User info: first_name, last_name, email, phone
-        $userInfo = $this->formatUserInfo($user);
+            // User info: first_name, last_name, email, phone
+            $userInfo = $this->formatUserInfo($user);
 
-        return $this->success('Dashboard retrieved successfully.', [
-            'counts' => [
-                'support_tickets' => $supportTicketsCount,
-                'payments' => $paymentsCount,
-                'leads' => $leadsCount,
-                'study_requirements' => $studyRequirementsCount,
-            ],
-            'recent_payments' => $recentPayments,
-            'recent_leads' => $recentLeads,
-            'latest_notifications' => $notifications,
-            'user' => $userInfo,
-        ]);
+            return [
+                'counts' => [
+                    'support_tickets' => $supportTicketsCount,
+                    'payments' => $paymentsCount,
+                    'leads' => $leadsCount,
+                    'study_requirements' => $studyRequirementsCount,
+                ],
+                'recent_payments' => $recentPayments,
+                'recent_leads' => $recentLeads,
+                'latest_notifications' => $notifications,
+                'user' => $userInfo,
+            ];
+        });
+
+        return $this->success('Dashboard retrieved successfully.', $payload);
+    }
+
+    protected function dashboardCacheTtlSeconds(): int
+    {
+        return max(30, (int) config('cache.dashboard_api_ttl_seconds', 60));
     }
 
     /**

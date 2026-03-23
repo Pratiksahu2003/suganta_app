@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\FlushesDashboardCache;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Notifications\DatabaseNotification;
 use Carbon\Carbon;
@@ -9,7 +10,7 @@ use Illuminate\Support\Str;
 
 class Notification extends DatabaseNotification
 {
-    use HasFactory;
+    use FlushesDashboardCache, HasFactory;
 
     protected $fillable = [
         'id',
@@ -199,5 +200,20 @@ class Notification extends DatabaseNotification
             'notifiable_id' => $userId,
             'data' => $notificationData
         ]);
+    }
+
+    protected static function booted(): void
+    {
+        static::saved(function (self $notification): void {
+            if ($notification->notifiable_type === User::class) {
+                static::flushDashboardCacheForUser((int) $notification->notifiable_id);
+            }
+        });
+
+        static::deleted(function (self $notification): void {
+            if ($notification->notifiable_type === User::class) {
+                static::flushDashboardCacheForUser((int) $notification->notifiable_id);
+            }
+        });
     }
 } 

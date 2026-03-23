@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\FlushesDashboardCache;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -11,7 +12,7 @@ use App\Models\RequirementConnected;
 
 class StudyRequirement extends Model
 {
-    use HasFactory;
+    use FlushesDashboardCache, HasFactory;
 
     protected $fillable = [
         'reference_id',
@@ -55,6 +56,14 @@ class StudyRequirement extends Model
             if (empty($requirement->reference_id)) {
                 $requirement->reference_id = self::generateReferenceId();
             }
+        });
+
+        static::saved(function (self $requirement): void {
+            static::flushDashboardCacheForUser($requirement->user_id);
+        });
+
+        static::deleted(function (self $requirement): void {
+            static::flushDashboardCacheForUser($requirement->user_id);
         });
     }
 

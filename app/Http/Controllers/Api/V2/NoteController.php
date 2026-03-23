@@ -16,6 +16,7 @@ use App\Traits\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -33,55 +34,60 @@ class NoteController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Note::where('is_active', true)
-            ->with(['noteType', 'noteCategory']);
+        $cacheKey = 'notes:index:'.sha1($this->normalizeForCache($request->query()));
+        $payload = Cache::remember($cacheKey, $this->readCacheTtlSeconds(), function () use ($request) {
+            $query = Note::where('is_active', true)
+                ->with(['noteType', 'noteCategory']);
 
-        if ($request->filled('category_id')) {
-            $query->where('note_category_id', $request->integer('category_id'));
-        }
+            if ($request->filled('category_id')) {
+                $query->where('note_category_id', $request->integer('category_id'));
+            }
 
-        if ($request->filled('note_type_id')) {
-            $query->where('note_type_id', $request->integer('note_type_id'));
-        }
+            if ($request->filled('note_type_id')) {
+                $query->where('note_type_id', $request->integer('note_type_id'));
+            }
 
-        if ($request->filled('search')) {
-            $search = $request->string('search');
-            $query->where(function ($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
-                    ->orWhere('description', 'like', "%{$search}%");
+            if ($request->filled('search')) {
+                $search = $request->string('search');
+                $query->where(function ($q) use ($search) {
+                    $q->where('name', 'like', "%{$search}%")
+                        ->orWhere('description', 'like', "%{$search}%");
+                });
+            }
+
+            if ($request->filled('is_paid')) {
+                $query->where('is_paid', $request->boolean('is_paid'));
+            }
+
+            $query->orderBy('created_at', 'desc');
+
+            $perPage = min((int) $request->get('per_page', 15), 50);
+            $notes = $query->paginate($perPage);
+
+            $data = $notes->through(function (Note $note) use ($request) {
+                return (new NoteResource($note))->toArray($request);
             });
-        }
 
-        if ($request->filled('is_paid')) {
-            $query->where('is_paid', $request->boolean('is_paid'));
-        }
-
-        $query->orderBy('created_at', 'desc');
-
-        $perPage = min((int) $request->get('per_page', 15), 50);
-        $notes = $query->paginate($perPage);
-
-        $data = $notes->through(function (Note $note) use ($request) {
-            return (new NoteResource($note))->toArray($request);
+            return [
+                'data' => $data->items(),
+                'meta' => [
+                    'current_page' => $data->currentPage(),
+                    'last_page' => $data->lastPage(),
+                    'per_page' => $data->perPage(),
+                    'total' => $data->total(),
+                    'from' => $data->firstItem(),
+                    'to' => $data->lastItem(),
+                ],
+                'links' => [
+                    'first' => $data->url(1),
+                    'last' => $data->url($data->lastPage()),
+                    'prev' => $data->previousPageUrl(),
+                    'next' => $data->nextPageUrl(),
+                ],
+            ];
         });
 
-        return $this->success('Notes retrieved successfully.', [
-            'data' => $data->items(),
-            'meta' => [
-                'current_page' => $data->currentPage(),
-                'last_page' => $data->lastPage(),
-                'per_page' => $data->perPage(),
-                'total' => $data->total(),
-                'from' => $data->firstItem(),
-                'to' => $data->lastItem(),
-            ],
-            'links' => [
-                'first' => $data->url(1),
-                'last' => $data->url($data->lastPage()),
-                'prev' => $data->previousPageUrl(),
-                'next' => $data->nextPageUrl(),
-            ],
-        ]);
+        return $this->success('Notes retrieved successfully.', $payload);
     }
 
     /**
@@ -93,11 +99,30 @@ class NoteController extends Controller
             return $this->notFound('Note not found or inactive.');
         }
 
-        $note->load(['noteType', 'noteCategory']);
+        $cacheKey = 'notes:show:'.$note->id;
+        $payload = Cache::remember($cacheKey, $this->readCacheTtlSeconds(), function () use ($note, $cacheKey) {
+            $freshNote = Note::query()
+                ->whereKey($note->id)
+                ->where('is_active', true)
+                ->with(['noteType', 'noteCategory'])
+                ->first();
 
-        return $this->success('Note retrieved successfully.', [
-            'note' => new NoteResource($note),
-        ]);
+            if (!$freshNote) {
+                Cache::forget($cacheKey);
+
+                return null;
+            }
+
+            return [
+                'note' => (new NoteResource($freshNote))->toArray(request()),
+            ];
+        });
+
+        if ($payload === null) {
+            return $this->notFound('Note not found or inactive.');
+        }
+
+        return $this->success('Note retrieved successfully.', $payload);
     }
 
     /**
@@ -249,9 +274,11 @@ class NoteController extends Controller
      */
     public function categories(): JsonResponse
     {
-        $categories = NoteCategory::active()
-            ->ordered()
-            ->get(['id', 'name', 'slug', 'description']);
+        $categories = Cache::remember('notes:categories', $this->readCacheTtlSeconds(), static function () {
+            return NoteCategory::active()
+                ->ordered()
+                ->get(['id', 'name', 'slug', 'description']);
+        });
 
         return $this->success('Note categories retrieved successfully.', [
             'categories' => $categories,
@@ -263,12 +290,32 @@ class NoteController extends Controller
      */
     public function types(): JsonResponse
     {
-        $types = NoteType::active()
-            ->ordered()
-            ->get(['id', 'code', 'name', 'description']);
+        $types = Cache::remember('notes:types', $this->readCacheTtlSeconds(), static function () {
+            return NoteType::active()
+                ->ordered()
+                ->get(['id', 'code', 'name', 'description']);
+        });
 
         return $this->success('Note types retrieved successfully.', [
             'types' => $types,
         ]);
+    }
+
+    private function readCacheTtlSeconds(): int
+    {
+        return max(30, (int) config('cache.notes_api_ttl_seconds', 120));
+    }
+
+    private function normalizeForCache(array $input): string
+    {
+        ksort($input);
+
+        foreach ($input as $key => $value) {
+            if (is_array($value)) {
+                $input[$key] = $this->normalizeForCache($value);
+            }
+        }
+
+        return json_encode($input, JSON_UNESCAPED_UNICODE) ?: '{}';
     }
 }

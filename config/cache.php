@@ -19,6 +19,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | API Cache TTLs (seconds)
+    |--------------------------------------------------------------------------
+    |
+    | Fine-tune API response cache durations per feature.
+    |
+    */
+
+    'notes_api_ttl_seconds' => env('NOTES_API_CACHE_TTL_SECONDS', 120),
+    'dashboard_api_ttl_seconds' => env('DASHBOARD_API_CACHE_TTL_SECONDS', 60),
+    'chat_api_ttl_seconds' => env('CHAT_API_CACHE_TTL_SECONDS', 45),
+
+    /*
+    |--------------------------------------------------------------------------
     | Cache Stores
     |--------------------------------------------------------------------------
     |

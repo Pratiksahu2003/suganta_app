@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V3\Chat;
 
 use App\Events\Chat\ConversationReadStateUpdated;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\V3\Chat\Concerns\InteractsWithChatCache;
 use App\Models\Chat\ChatConversation;
 use App\Models\Chat\ChatConversationParticipant;
 use App\Models\Chat\ChatMessage;
@@ -16,7 +17,7 @@ use Illuminate\Support\Facades\DB;
 
 class ConversationController extends Controller
 {
-    use ApiResponse;
+    use ApiResponse, InteractsWithChatCache;
 
     public function searchUsers(Request $request): JsonResponse
     {
@@ -28,67 +29,77 @@ class ConversationController extends Controller
         $auth = $request->user();
         $query = trim($validated['q']);
         $limit = (int) ($validated['limit'] ?? 20);
-        $phoneQuery = preg_replace('/\D+/', '', $query) ?? '';
-        $normalizedPhoneSql = "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', ''), '(', ''), ')', '')";
+        $version = $this->chatUserVersion((int) $auth->id);
+        $cacheKey = 'chat:v3:search_users:'.$auth->id.':'.$version.':'.sha1(json_encode([
+            'q' => mb_strtolower($query),
+            'limit' => $limit,
+        ], JSON_UNESCAPED_UNICODE));
 
-        $usersQuery = User::query()
-            ->where('id', '!=', $auth->id)
-            ->where(function ($builder) use ($query, $phoneQuery): void {
-                $builder->where('name', 'like', '%'.$query.'%');
+        $payload = \Illuminate\Support\Facades\Cache::remember($cacheKey, $this->chatCacheTtlSeconds(), function () use ($auth, $query, $limit) {
+            $phoneQuery = preg_replace('/\D+/', '', $query) ?? '';
+            $normalizedPhoneSql = "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', ''), '(', ''), ')', '')";
 
-                if ($phoneQuery !== '') {
-                    $builder->orWhere('phone', 'like', '%'.$phoneQuery.'%');
-                    $builder->orWhereRaw(
-                        "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', ''), '(', ''), ')', '') like ?",
-                        ['%'.$phoneQuery.'%']
-                    );
-                }
-            })
-            ->orderByRaw('CASE WHEN name LIKE ? THEN 0 ELSE 1 END', [$query.'%']);
+            $usersQuery = User::query()
+                ->where('id', '!=', $auth->id)
+                ->where(function ($builder) use ($query, $phoneQuery): void {
+                    $builder->where('name', 'like', '%'.$query.'%');
 
-        if ($phoneQuery !== '') {
-            $usersQuery->orderByRaw('CASE WHEN '.$normalizedPhoneSql.' LIKE ? THEN 0 ELSE 1 END', [$phoneQuery.'%']);
-        }
+                    if ($phoneQuery !== '') {
+                        $builder->orWhere('phone', 'like', '%'.$phoneQuery.'%');
+                        $builder->orWhereRaw(
+                            "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', ''), '(', ''), ')', '') like ?",
+                            ['%'.$phoneQuery.'%']
+                        );
+                    }
+                })
+                ->orderByRaw('CASE WHEN name LIKE ? THEN 0 ELSE 1 END', [$query.'%']);
 
-        $users = $usersQuery
-            ->with('profile:id,user_id,profile_image')
-            ->orderBy('name')
-            ->limit($limit)
-            ->get(['id', 'name', 'phone']);
+            if ($phoneQuery !== '') {
+                $usersQuery->orderByRaw('CASE WHEN '.$normalizedPhoneSql.' LIKE ? THEN 0 ELSE 1 END', [$phoneQuery.'%']);
+            }
 
-        $existingPrivateMap = collect();
-        if ($users->isNotEmpty()) {
-            $otherUserIds = $users->pluck('id')->values();
-            $existingPrivateMap = ChatConversation::query()
-                ->select(['chat_conversations.id', 'other.user_id as other_user_id'])
-                ->join('chat_conversation_participants as me', 'me.conversation_id', '=', 'chat_conversations.id')
-                ->join('chat_conversation_participants as other', 'other.conversation_id', '=', 'chat_conversations.id')
-                ->where('chat_conversations.type', 'private')
-                ->whereNull('me.left_at')
-                ->whereNull('other.left_at')
-                ->where('me.user_id', $auth->id)
-                ->whereIn('other.user_id', $otherUserIds)
-                ->pluck('chat_conversations.id', 'other_user_id');
-        }
+            $users = $usersQuery
+                ->with('profile:id,user_id,profile_image')
+                ->orderBy('name')
+                ->limit($limit)
+                ->get(['id', 'name', 'phone']);
 
-        $users = $users->map(function (User $user) use ($existingPrivateMap) {
-            $privateConversationId = $existingPrivateMap->get($user->id);
+            $existingPrivateMap = collect();
+            if ($users->isNotEmpty()) {
+                $otherUserIds = $users->pluck('id')->values();
+                $existingPrivateMap = ChatConversation::query()
+                    ->select(['chat_conversations.id', 'other.user_id as other_user_id'])
+                    ->join('chat_conversation_participants as me', 'me.conversation_id', '=', 'chat_conversations.id')
+                    ->join('chat_conversation_participants as other', 'other.conversation_id', '=', 'chat_conversations.id')
+                    ->where('chat_conversations.type', 'private')
+                    ->whereNull('me.left_at')
+                    ->whereNull('other.left_at')
+                    ->where('me.user_id', $auth->id)
+                    ->whereIn('other.user_id', $otherUserIds)
+                    ->pluck('chat_conversations.id', 'other_user_id');
+            }
+
+            $users = $users->map(function (User $user) use ($existingPrivateMap) {
+                $privateConversationId = $existingPrivateMap->get($user->id);
+
+                return [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'phone' => mask_phone_for_display($user->phone),
+                    'profile_image' => storage_file_url($user->profile?->profile_image),
+                    'has_private_conversation' => $privateConversationId !== null,
+                    'private_conversation_id' => $privateConversationId,
+                ];
+            })->values();
 
             return [
-                'id' => $user->id,
-                'name' => $user->name,
-                'phone' => mask_phone_for_display($user->phone),
-                'profile_image' => storage_file_url($user->profile?->profile_image),
-                'has_private_conversation' => $privateConversationId !== null,
-                'private_conversation_id' => $privateConversationId,
+                'query' => $query,
+                'total' => $users->count(),
+                'users' => $users,
             ];
-        })->values();
+        });
 
-        return $this->success('Users fetched successfully.', [
-            'query' => $query,
-            'total' => $users->count(),
-            'users' => $users,
-        ]);
+        return $this->success('Users fetched successfully.', $payload);
     }
 
     public function index(Request $request): JsonResponse
@@ -99,28 +110,38 @@ class ConversationController extends Controller
 
         $user = $request->user();
         $folder = (string) $request->query('folder', 'inbox');
+        $page = max(1, (int) $request->query('page', 1));
+        $userVersion = $this->chatUserVersion((int) $user->id);
+        $cacheKey = 'chat:v3:conversations:index:'.$user->id.':'.$userVersion.':'.sha1(json_encode([
+            'folder' => $folder,
+            'page' => $page,
+        ], JSON_UNESCAPED_UNICODE));
 
-        $paginator = ChatConversation::query()
-            ->whereHas('participants', function ($query) use ($user, $folder): void {
-                $query->where('user_id', $user->id)->whereNull('left_at');
-                if ($folder === 'inbox') {
-                    $query->whereNull('archived_at');
-                } elseif ($folder === 'archived') {
-                    $query->whereNotNull('archived_at');
-                }
-            })
-            ->withCount(['messages as total_messages'])
-            ->orderByDesc('last_message_at')
-            ->orderByDesc('id')
-            ->paginate(20);
+        $payload = \Illuminate\Support\Facades\Cache::remember($cacheKey, $this->chatCacheTtlSeconds(), function () use ($user, $folder) {
+            $paginator = ChatConversation::query()
+                ->whereHas('participants', function ($query) use ($user, $folder): void {
+                    $query->where('user_id', $user->id)->whereNull('left_at');
+                    if ($folder === 'inbox') {
+                        $query->whereNull('archived_at');
+                    } elseif ($folder === 'archived') {
+                        $query->whereNotNull('archived_at');
+                    }
+                })
+                ->withCount(['messages as total_messages'])
+                ->orderByDesc('last_message_at')
+                ->orderByDesc('id')
+                ->paginate(20);
 
-        $presented = $this->presentConversationCollection($paginator->getCollection(), $user);
-        $paginator->setCollection($presented);
+            $presented = $this->presentConversationCollection($paginator->getCollection(), $user);
+            $paginator->setCollection($presented);
 
-        return $this->success('Chat conversations fetched successfully.', array_merge(
-            ['folder' => $folder],
-            $paginator->toArray()
-        ));
+            return array_merge(
+                ['folder' => $folder],
+                $paginator->toArray()
+            );
+        });
+
+        return $this->success('Chat conversations fetched successfully.', $payload);
     }
 
     public function update(Request $request, int $conversation): JsonResponse
@@ -154,6 +175,7 @@ class ConversationController extends Controller
             $participant->archived_at = $validated['archived'] ? now() : null;
         }
         $participant->save();
+        $this->flushConversationReadCaches($chat->id, [$auth->id]);
 
         return $this->success('Conversation updated successfully.', [
             'my_membership' => $this->myMembershipPayload($participant),
@@ -200,6 +222,7 @@ class ConversationController extends Controller
             if ($current === null || $tipId > $current) {
                 $participant->last_read_message_id = $tipId;
                 $participant->save();
+                $this->flushConversationReadCaches($chat->id, [$auth->id]);
             }
         }
 
@@ -285,6 +308,10 @@ class ConversationController extends Controller
 
             return $conversation;
         });
+        foreach ($participantIds->push($user->id) as $participantUserId) {
+            $this->bumpChatUserVersion((int) $participantUserId);
+        }
+        $this->bumpChatConversationVersion((int) $conversation->id);
 
         return $this->created([
             'conversation' => $this->presentConversationDetail($conversation->fresh(), $user),
@@ -300,11 +327,19 @@ class ConversationController extends Controller
             return $this->forbidden('You are not part of this conversation.');
         }
 
-        return $this->success('Chat conversation fetched successfully.', [
-            'conversation' => $this->presentConversationDetail($chat, $user),
-            'participants' => $this->enrichedParticipants($chat)->values(),
-            'my_membership' => $this->myMembershipForChat($chat, $user),
-        ]);
+        $userVersion = $this->chatUserVersion((int) $user->id);
+        $conversationVersion = $this->chatConversationVersion((int) $chat->id);
+        $cacheKey = 'chat:v3:conversations:show:'.$chat->id.':'.$user->id.':'.$userVersion.':'.$conversationVersion;
+
+        $payload = \Illuminate\Support\Facades\Cache::remember($cacheKey, $this->chatCacheTtlSeconds(), function () use ($chat, $user) {
+            return [
+                'conversation' => $this->presentConversationDetail($chat, $user),
+                'participants' => $this->enrichedParticipants($chat)->values(),
+                'my_membership' => $this->myMembershipForChat($chat, $user),
+            ];
+        });
+
+        return $this->success('Chat conversation fetched successfully.', $payload);
     }
 
     public function addParticipant(Request $request, int $conversation): JsonResponse
@@ -332,6 +367,7 @@ class ConversationController extends Controller
             ['conversation_id' => $chat->id, 'user_id' => $validated['user_id']],
             ['role' => 'member', 'joined_at' => now(), 'left_at' => null]
         );
+        $this->flushConversationReadCaches($chat->id, [$auth->id, (int) $validated['user_id']]);
 
         return $this->success('Participant added successfully.');
     }
@@ -361,6 +397,7 @@ class ConversationController extends Controller
         if ($affected === 0) {
             return $this->notFound('Participant not found in this conversation.');
         }
+        $this->flushConversationReadCaches($chat->id, [$auth->id, $user]);
 
         return $this->success('Participant removed successfully.');
     }
@@ -378,6 +415,7 @@ class ConversationController extends Controller
         if ($affected === 0) {
             return $this->notFound('You are not an active participant in this conversation.');
         }
+        $this->flushConversationReadCaches($chat->id, [$auth->id]);
 
         return $this->success('You have left the conversation.');
     }

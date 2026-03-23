@@ -2,13 +2,14 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\FlushesDashboardCache;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Lead extends Model
 {
-    use HasFactory, SoftDeletes;
+    use FlushesDashboardCache, HasFactory, SoftDeletes;
 
     protected $fillable = [
         'lead_id',
@@ -53,6 +54,24 @@ class Lead extends Model
             if (empty($lead->lead_id)) {
                 $lead->lead_id = static::generateLeadId();
             }
+        });
+
+        static::saved(function (Lead $lead): void {
+            static::flushDashboardCacheForUser($lead->user_id);
+            static::flushDashboardCacheForUser($lead->lead_owner_id);
+            static::flushDashboardCacheForUser($lead->assigned_to);
+        });
+
+        static::deleted(function (Lead $lead): void {
+            static::flushDashboardCacheForUser($lead->user_id);
+            static::flushDashboardCacheForUser($lead->lead_owner_id);
+            static::flushDashboardCacheForUser($lead->assigned_to);
+        });
+
+        static::restored(function (Lead $lead): void {
+            static::flushDashboardCacheForUser($lead->user_id);
+            static::flushDashboardCacheForUser($lead->lead_owner_id);
+            static::flushDashboardCacheForUser($lead->assigned_to);
         });
     }
 
