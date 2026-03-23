@@ -8,10 +8,6 @@ use Illuminate\Support\Facades\Log;
 
 class NotificationService
 {
-    public function __construct(private readonly FirebasePushService $firebasePushService)
-    {
-    }
-
     /**
      * Create a notification for a user
      */
@@ -48,17 +44,10 @@ class NotificationService
 
         $user = User::query()->find($userId);
         if ($user !== null) {
-            Log::channel('firebase_push')->info('notification.push.triggered', [
+            Log::channel('firebase_push')->info('notification.push.queued_via_observer', [
                 'user_id' => $userId,
                 'notification_id' => (string) $notification->id,
                 'type' => $type,
-            ]);
-            $this->firebasePushService->sendToUser($user, $title, $message, [
-                'kind' => 'system_notification',
-                'notification_id' => (string) $notification->id,
-                'type' => $type,
-                'priority' => $priority,
-                'action_url' => $actionUrl,
             ]);
         } else {
             Log::channel('firebase_push')->warning('notification.push.skipped.user_not_found', [

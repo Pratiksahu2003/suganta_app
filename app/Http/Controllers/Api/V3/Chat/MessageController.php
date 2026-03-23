@@ -13,13 +13,11 @@ use App\Models\Chat\ChatConversationParticipant;
 use App\Models\Chat\ChatMessage;
 use App\Models\Chat\ChatMessageReaction;
 use App\Models\Chat\ChatMessageRead;
-use App\Models\User;
-use App\Services\FirebasePushService;
+use App\Services\PushNotificationDispatcher;
 use App\Support\ChatPlainText;
 use App\Traits\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
 
@@ -27,7 +25,7 @@ class MessageController extends Controller
 {
     use ApiResponse, InteractsWithChatCache;
 
-    public function __construct(private readonly FirebasePushService $firebasePushService)
+    public function __construct(private readonly PushNotificationDispatcher $pushNotificationDispatcher)
     {
     }
 
@@ -132,7 +130,19 @@ class MessageController extends Controller
         $this->flushConversationReadCaches($chat->id, [$auth->id]);
 
         broadcast(new MessageSent($message))->toOthers();
-        $this->sendPushForNewMessage($chat->id, $message, $auth->id, $auth->name);
+        $this->pushNotificationDispatcher->dispatchChatEvent(
+            $chat->id,
+            $auth->id,
+            "New message from {$auth->name}",
+            Str::limit((string) $message->message, 120),
+            [
+                'kind' => 'chat_message',
+                'conversation_id' => (string) $chat->id,
+                'message_id' => (string) $message->id,
+                'sender_id' => (string) $auth->id,
+            ],
+            'new_message'
+        );
 
         return $this->created([
             'message' => $this->serializeChatMessage($message->load([
@@ -183,6 +193,19 @@ class MessageController extends Controller
         ]);
 
         broadcast(new MessageSent($fresh))->toOthers();
+        $this->pushNotificationDispatcher->dispatchChatEvent(
+            $chatMessage->conversation_id,
+            $auth->id,
+            "{$auth->name} edited a message",
+            'A message was edited in your conversation.',
+            [
+                'kind' => 'chat_message_edited',
+                'conversation_id' => (string) $chatMessage->conversation_id,
+                'message_id' => (string) $chatMessage->id,
+                'actor_user_id' => (string) $auth->id,
+            ],
+            'message_edited'
+        );
 
         return $this->success('Message updated successfully.', [
             'message' => $this->serializeChatMessage($fresh, $auth->id),
@@ -204,6 +227,19 @@ class MessageController extends Controller
 
         $chatMessage->update(['deleted_at' => now()]);
         $this->flushConversationReadCaches($chatMessage->conversation_id, [$auth->id]);
+        $this->pushNotificationDispatcher->dispatchChatEvent(
+            $chatMessage->conversation_id,
+            $auth->id,
+            "{$auth->name} deleted a message",
+            'A message was deleted in your conversation.',
+            [
+                'kind' => 'chat_message_deleted',
+                'conversation_id' => (string) $chatMessage->conversation_id,
+                'message_id' => (string) $chatMessage->id,
+                'actor_user_id' => (string) $auth->id,
+            ],
+            'message_deleted'
+        );
 
         return $this->success('Message deleted successfully.');
     }
@@ -246,6 +282,19 @@ class MessageController extends Controller
             $auth->id,
             $read->read_at->toIso8601String()
         ))->toOthers();
+        $this->pushNotificationDispatcher->dispatchChatEvent(
+            $chatMessage->conversation_id,
+            $auth->id,
+            "{$auth->name} read a message",
+            'A message was marked as read.',
+            [
+                'kind' => 'chat_message_read',
+                'conversation_id' => (string) $chatMessage->conversation_id,
+                'message_id' => (string) $chatMessage->id,
+                'actor_user_id' => (string) $auth->id,
+            ],
+            'message_read'
+        );
 
         return $this->success('Message marked as read.');
     }
@@ -288,6 +337,20 @@ class MessageController extends Controller
             $auth->id,
             $validated['reaction']
         ))->toOthers();
+        $this->pushNotificationDispatcher->dispatchChatEvent(
+            $chatMessage->conversation_id,
+            $auth->id,
+            "{$auth->name} reacted to a message",
+            "Reaction: {$validated['reaction']}",
+            [
+                'kind' => 'chat_reaction_added',
+                'conversation_id' => (string) $chatMessage->conversation_id,
+                'message_id' => (string) $chatMessage->id,
+                'actor_user_id' => (string) $auth->id,
+                'reaction' => $validated['reaction'],
+            ],
+            'reaction_added'
+        );
 
         return $this->success('Reaction updated successfully.');
     }
@@ -316,6 +379,19 @@ class MessageController extends Controller
             $auth->id,
             null
         ))->toOthers();
+        $this->pushNotificationDispatcher->dispatchChatEvent(
+            $chatMessage->conversation_id,
+            $auth->id,
+            "{$auth->name} removed a reaction",
+            'A reaction was removed from a message.',
+            [
+                'kind' => 'chat_reaction_removed',
+                'conversation_id' => (string) $chatMessage->conversation_id,
+                'message_id' => (string) $chatMessage->id,
+                'actor_user_id' => (string) $auth->id,
+            ],
+            'reaction_removed'
+        );
 
         return $this->success('Reaction removed successfully.');
     }
@@ -425,47 +501,4 @@ class MessageController extends Controller
         ];
     }
 
-    private function sendPushForNewMessage(int $conversationId, ChatMessage $message, int $senderId, string $senderName): void
-    {
-        Log::channel('firebase_push')->info('chat.push.trigger.started', [
-            'conversation_id' => $conversationId,
-            'message_id' => $message->id,
-            'sender_id' => $senderId,
-        ]);
-
-        $recipientIds = ChatConversationParticipant::query()
-            ->where('conversation_id', $conversationId)
-            ->whereNull('left_at')
-            ->where('user_id', '!=', $senderId)
-            ->pluck('user_id')
-            ->unique()
-            ->values();
-
-        if ($recipientIds->isEmpty()) {
-            Log::channel('firebase_push')->info('chat.push.trigger.skipped.no_recipients', [
-                'conversation_id' => $conversationId,
-                'message_id' => $message->id,
-            ]);
-            return;
-        }
-
-        $recipients = User::query()->whereIn('id', $recipientIds->all())->get(['id', 'push_subscription']);
-        $preview = Str::limit((string) $message->message, 120);
-        $title = "New message from {$senderName}";
-        Log::channel('firebase_push')->info('chat.push.trigger.recipients_loaded', [
-            'conversation_id' => $conversationId,
-            'message_id' => $message->id,
-            'recipient_count' => $recipients->count(),
-            'recipient_ids' => $recipients->pluck('id')->values()->all(),
-        ]);
-
-        foreach ($recipients as $recipient) {
-            $this->firebasePushService->sendToUser($recipient, $title, $preview, [
-                'kind' => 'chat_message',
-                'conversation_id' => (string) $conversationId,
-                'message_id' => (string) $message->id,
-                'sender_id' => (string) $senderId,
-            ]);
-        }
-    }
 }

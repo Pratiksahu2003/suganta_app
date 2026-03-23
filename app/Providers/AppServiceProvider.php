@@ -4,9 +4,11 @@ namespace App\Providers;
 
 use App\Models\Profile;
 use App\Models\ProfileInstituteInfo;
+use App\Models\Notification;
 use App\Models\Review;
 use App\Models\Subject;
 use App\Models\UserSession;
+use App\Observers\NotificationObserver;
 use App\Observers\ProfileInstituteInfoObserver;
 use App\Observers\ProfileObserver;
 use App\Observers\ReviewObserver;
@@ -37,5 +39,6 @@ class AppServiceProvider extends ServiceProvider
         ProfileInstituteInfo::observe(ProfileInstituteInfoObserver::class);
         Review::observe(ReviewObserver::class);
         UserSession::observe(UserSessionObserver::class);
+        Notification::observe(NotificationObserver::class);
     }
 }
