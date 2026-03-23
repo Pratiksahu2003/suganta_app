@@ -14,8 +14,11 @@ use Illuminate\Support\Facades\Storage;
  */
 function storage_file_url(?string $path = null, ?string $disk = null): string
 {
+
     if (is_null($path)) {
-        return asset('img/no.jpg');
+        return Cache::rememberForever('placeholder_no_image', function () {
+            return asset('img/no.png');
+        });
     }
     $disk = $disk ?? config('filesystems.upload_disk', 'public');
 
@@ -28,7 +31,7 @@ function storage_file_url(?string $path = null, ?string $disk = null): string
         $cacheSeconds = $configuredCacheSeconds > 0
             ? min(max(60, $configuredCacheSeconds), $fallbackCacheSeconds)
             : $fallbackCacheSeconds;
-        $cacheKey = 'storage_file_url:gcs:'.sha1($path);
+        $cacheKey = 'storage_file_url:gcs:' . sha1($path);
 
         return Cache::remember($cacheKey, $cacheSeconds, static function () use ($path, $expiry): string {
             return Storage::disk('gcs')->temporaryUrl($path, $expiry);
@@ -66,8 +69,8 @@ function mask_phone_for_display(?string $phone): ?string
     $mask = str_repeat('•', $maskLen);
 
     if (str_starts_with($trimmed, '+') && preg_match('/^\+\d{1,3}/', $trimmed, $m)) {
-        return $m[0].' '.$mask.$suffix;
+        return $m[0] . ' ' . $mask . $suffix;
     }
 
-    return $mask.$suffix;
+    return $mask . $suffix;
 }
