@@ -29,6 +29,10 @@ return [
     'notes_api_ttl_seconds' => env('NOTES_API_CACHE_TTL_SECONDS', 120),
     'dashboard_api_ttl_seconds' => env('DASHBOARD_API_CACHE_TTL_SECONDS', 60),
     'chat_api_ttl_seconds' => env('CHAT_API_CACHE_TTL_SECONDS', 45),
+    'v4_google_cache_store' => env('V4_GOOGLE_CACHE_STORE', 'redis'),
+    'v4_google_calendar_ttl_seconds' => env('V4_GOOGLE_CALENDAR_CACHE_TTL_SECONDS', 60),
+    'v4_google_youtube_ttl_seconds' => env('V4_GOOGLE_YOUTUBE_CACHE_TTL_SECONDS', 120),
+    'v4_google_drive_ttl_seconds' => env('V4_GOOGLE_DRIVE_CACHE_TTL_SECONDS', 90),
 
     /*
     |--------------------------------------------------------------------------

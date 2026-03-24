@@ -47,4 +47,20 @@ return [
         'credentials' => env('FIREBASE_CREDENTIALS', base_path('storage/keys/suganta-tutors-firebase-adminsdk-fbsvc-51a7fa7774.json')),
     ],
 
+    'google' => [
+        'timeout_seconds' => env('GOOGLE_API_TIMEOUT_SECONDS', 15),
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'oauth_token_url' => env('GOOGLE_OAUTH_TOKEN_URL', 'https://oauth2.googleapis.com/token'),
+        'redirect_uri' => env('GOOGLE_REDIRECT_URI'),
+        'webhook_url' => env('GOOGLE_WEBHOOK_URL'),
+        'webhook_secret' => env('GOOGLE_WEBHOOK_SECRET'),
+        'webhook_replay_window_seconds' => env('GOOGLE_WEBHOOK_REPLAY_WINDOW_SECONDS', 300),
+        'watch_token_ttl_seconds' => env('GOOGLE_WATCH_TOKEN_TTL_SECONDS', 86400),
+        'watch_renew_before_seconds' => env('GOOGLE_WATCH_RENEW_BEFORE_SECONDS', 900),
+        'calendar_base_url' => env('GOOGLE_CALENDAR_BASE_URL', 'https://www.googleapis.com/calendar/v3'),
+        'youtube_base_url' => env('GOOGLE_YOUTUBE_BASE_URL', 'https://www.googleapis.com/youtube/v3'),
+        'drive_base_url' => env('GOOGLE_DRIVE_BASE_URL', 'https://www.googleapis.com/drive/v3'),
+    ],
+
 ];
