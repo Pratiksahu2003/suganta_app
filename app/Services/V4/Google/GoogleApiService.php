@@ -369,12 +369,17 @@ class GoogleApiService
             'token_preview' => mb_substr($normalizedToken, 0, 20).'...',
         ]);
 
-        $response = $client
-            ->asJson()
-            ->send($methodUpper, $url, [
-                'query' => $query,
-                'json' => $payload,
-            ]);
+        if ($methodUpper === 'GET') {
+            // Never send JSON body on GET requests; some Google edges treat it as malformed.
+            $response = $client->get($url, $query);
+        } else {
+            $response = $client
+                ->asJson()
+                ->send($methodUpper, $url, [
+                    'query' => $query,
+                    'json' => $payload,
+                ]);
+        }
 
         Log::info('Google API Response', [
             'method' => $methodUpper,
