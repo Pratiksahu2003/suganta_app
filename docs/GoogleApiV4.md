@@ -298,8 +298,11 @@ try {
 
 ## Required env for this module
 
-- `GOOGLE_CLIENT_ID`
-- `GOOGLE_CLIENT_SECRET`
+- `GOOGLE_OAUTH_CLIENT_JSON`
+  - Example: `storage/keys/suganta-sync.json`
+  - JSON values are used first for `client_id`, `client_secret`, and `redirect_uri`.
+- `GOOGLE_CLIENT_ID` (optional fallback if JSON missing)
+- `GOOGLE_CLIENT_SECRET` (optional fallback if JSON missing)
 - `GOOGLE_OAUTH_TOKEN_URL`
 - `GOOGLE_REDIRECT_URI`
   - Recommended: `https://your-domain.com/api/v4/google/oauth/callback`

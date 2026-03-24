@@ -49,6 +49,7 @@ return [
 
     'google' => [
         'timeout_seconds' => env('GOOGLE_API_TIMEOUT_SECONDS', 15),
+        'oauth_client_json' => env('GOOGLE_OAUTH_CLIENT_JSON', 'storage/keys/suganta-sync.json'),
         'client_id' => env('GOOGLE_CLIENT_ID'),
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),
         'oauth_token_url' => env('GOOGLE_OAUTH_TOKEN_URL', 'https://oauth2.googleapis.com/token'),

@@ -5,6 +5,7 @@ namespace App\Services\V4\Google;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Factory as HttpFactory;
+use Illuminate\Support\Facades\File;
 use RuntimeException;
 
 class GoogleTokenService
@@ -79,8 +80,9 @@ class GoogleTokenService
             throw new RuntimeException('Google account is not connected. Please connect with refresh token first.', 422);
         }
 
-        $clientId = (string) config('services.google.client_id');
-        $clientSecret = (string) config('services.google.client_secret');
+        $oauth = $this->resolveOAuthClientConfig();
+        $clientId = $oauth['client_id'];
+        $clientSecret = $oauth['client_secret'];
         $tokenUrl = (string) config('services.google.oauth_token_url', 'https://oauth2.googleapis.com/token');
 
         if ($clientId === '' || $clientSecret === '') {
@@ -122,10 +124,11 @@ class GoogleTokenService
 
     public function exchangeAuthorizationCode(User $user, string $code, ?string $redirectUri = null): array
     {
-        $clientId = (string) config('services.google.client_id');
-        $clientSecret = (string) config('services.google.client_secret');
+        $oauth = $this->resolveOAuthClientConfig();
+        $clientId = $oauth['client_id'];
+        $clientSecret = $oauth['client_secret'];
         $tokenUrl = (string) config('services.google.oauth_token_url', 'https://oauth2.googleapis.com/token');
-        $resolvedRedirectUri = $redirectUri ?: (string) config('services.google.redirect_uri');
+        $resolvedRedirectUri = $redirectUri ?: ((string) config('services.google.redirect_uri') ?: $oauth['redirect_uri']);
 
         if ($clientId === '' || $clientSecret === '' || $resolvedRedirectUri === '') {
             throw new RuntimeException('Google OAuth credentials/redirect URI are not configured on server.', 500);
@@ -184,5 +187,53 @@ class GoogleTokenService
             'token_expires_at' => optional($user->google_token_expires_at)?->toISOString(),
             'token_valid' => $user->google_token_expires_at?->gt(now()->addMinutes(2)) ?? false,
         ];
+    }
+
+    /**
+     * Resolve OAuth client credentials from JSON first, env as fallback.
+     *
+     * @return array{client_id:string,client_secret:string,redirect_uri:string}
+     */
+    private function resolveOAuthClientConfig(): array
+    {
+        $clientId = (string) config('services.google.client_id', '');
+        $clientSecret = (string) config('services.google.client_secret', '');
+        $redirectUri = (string) config('services.google.redirect_uri', '');
+
+        $jsonPath = (string) config('services.google.oauth_client_json', '');
+        if ($jsonPath !== '') {
+            $absolutePath = $this->resolvePath($jsonPath);
+            if (File::exists($absolutePath)) {
+                $decoded = json_decode((string) File::get($absolutePath), true);
+                if (is_array($decoded)) {
+                    $oauthNode = is_array($decoded['web'] ?? null)
+                        ? $decoded['web']
+                        : (is_array($decoded['installed'] ?? null) ? $decoded['installed'] : []);
+
+                    $clientId = (string) ($oauthNode['client_id'] ?? $clientId);
+                    $clientSecret = (string) ($oauthNode['client_secret'] ?? $clientSecret);
+
+                    $redirectUris = $oauthNode['redirect_uris'] ?? [];
+                    if ($redirectUri === '' && is_array($redirectUris) && isset($redirectUris[0])) {
+                        $redirectUri = (string) $redirectUris[0];
+                    }
+                }
+            }
+        }
+
+        return [
+            'client_id' => $clientId,
+            'client_secret' => $clientSecret,
+            'redirect_uri' => $redirectUri,
+        ];
+    }
+
+    private function resolvePath(string $path): string
+    {
+        if (str_starts_with($path, '/') || preg_match('/^[A-Za-z]:\\\\/', $path) === 1) {
+            return $path;
+        }
+
+        return base_path($path);
     }
 }
