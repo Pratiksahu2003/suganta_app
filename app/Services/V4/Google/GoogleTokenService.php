@@ -7,6 +7,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 
@@ -102,6 +103,11 @@ class GoogleTokenService
                 'grant_type' => 'refresh_token',
             ]);
 
+        $this->logOAuthResponse($tokenUrl, $response->status(), [
+            'grant_type' => 'refresh_token',
+            'response' => $this->oauthBodyForLog($response),
+        ]);
+
         if (! $response->successful()) {
             $message = (string) data_get($response->json(), 'error_description', data_get($response->json(), 'error', 'Unable to refresh Google access token.'));
             throw new RuntimeException($message, $response->status() ?: 400);
@@ -147,6 +153,11 @@ class GoogleTokenService
                 'redirect_uri' => $resolvedRedirectUri,
                 'grant_type' => 'authorization_code',
             ]);
+
+        $this->logOAuthResponse($tokenUrl, $response->status(), [
+            'grant_type' => 'authorization_code',
+            'response' => $this->oauthBodyForLog($response),
+        ]);
 
         if (! $response->successful()) {
             $message = (string) data_get($response->json(), 'error_description', data_get($response->json(), 'error', 'Unable to exchange Google authorization code.'));
@@ -312,5 +323,27 @@ class GoogleTokenService
             'https://www.googleapis.com/auth/youtube.readonly',
             'https://www.googleapis.com/auth/userinfo.email',
         ];
+    }
+
+    private function oauthBodyForLog(\Illuminate\Http\Client\Response $response): mixed
+    {
+        $json = $response->json();
+        if (is_array($json)) {
+            return $json;
+        }
+
+        $raw = trim($response->body());
+
+        return $raw === '' ? null : mb_substr($raw, 0, 1500);
+    }
+
+    private function logOAuthResponse(string $url, int $status, array $context = []): void
+    {
+        $level = $status >= 400 ? 'error' : 'info';
+        Log::log($level, 'Google OAuth call completed', [
+            'url' => $url,
+            'status' => $status,
+            ...$context,
+        ]);
     }
 }

@@ -5,6 +5,7 @@ namespace App\Services\V4\Google;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Log;
 
 class GoogleApiService
 {
@@ -171,6 +172,17 @@ class GoogleApiService
                 'body' => $body,
             ]);
 
+        $this->logGoogleApiResponse('POST', 'https://www.googleapis.com/upload/drive/v3/files', $response->status(), [
+            'query' => ['uploadType' => 'multipart'],
+            'request' => [
+                'name' => $metadata['name'] ?? null,
+                'parent_id' => $parentId,
+                'mime_type' => $fileMimeType,
+                'size_bytes' => $file->getSize(),
+            ],
+            'response' => $this->responseBodyForLog($response),
+        ]);
+
         try {
             $response->throw();
         } catch (RequestException $exception) {
@@ -329,6 +341,12 @@ class GoogleApiService
                 'json' => $payload,
             ]);
 
+        $this->logGoogleApiResponse(strtoupper($method), $url, $response->status(), [
+            'query' => $query,
+            'request' => $payload,
+            'response' => $this->responseBodyForLog($response),
+        ]);
+
         try {
             $response->throw();
         } catch (RequestException $exception) {
@@ -395,5 +413,28 @@ class GoogleApiService
         }
 
         return $trimmed;
+    }
+
+    private function responseBodyForLog(\Illuminate\Http\Client\Response $response): mixed
+    {
+        $json = $response->json();
+        if (is_array($json)) {
+            return $json;
+        }
+
+        $raw = trim($response->body());
+
+        return $raw === '' ? null : mb_substr($raw, 0, 1500);
+    }
+
+    private function logGoogleApiResponse(string $method, string $url, int $status, array $context = []): void
+    {
+        $level = $status >= 400 ? 'error' : 'info';
+        Log::log($level, 'Google API call completed', [
+            'method' => $method,
+            'url' => $url,
+            'status' => $status,
+            ...$context,
+        ]);
     }
 }
