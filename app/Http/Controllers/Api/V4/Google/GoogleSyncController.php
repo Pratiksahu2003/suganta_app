@@ -205,6 +205,43 @@ class GoogleSyncController extends Controller
             }
         }
 
+        // If Google reports 401 for one/all services, refresh access token once and retry failed services.
+        if ($errors !== [] && collect($errors)->contains(fn (string $message): bool => $this->isGoogleUnauthorizedMessage($message))) {
+            try {
+                $token = $this->googleTokenService->refreshAccessToken($user->refresh());
+
+                if (isset($errors['calendar']) && $this->isGoogleUnauthorizedMessage((string) $errors['calendar'])) {
+                    $payload['calendar'] = $this->googleSyncService->syncCalendar(
+                        (int) $user->id,
+                        $token,
+                        (int) $request->input('calendar.max_results', 20)
+                    );
+                    unset($errors['calendar']);
+                }
+
+                if (isset($errors['youtube']) && $this->isGoogleUnauthorizedMessage((string) $errors['youtube'])) {
+                    $payload['youtube'] = $this->googleSyncService->syncYoutube(
+                        (int) $user->id,
+                        $token,
+                        (int) $request->input('youtube.max_results', 10)
+                    );
+                    unset($errors['youtube']);
+                }
+
+                if (isset($errors['drive']) && $this->isGoogleUnauthorizedMessage((string) $errors['drive'])) {
+                    $payload['drive'] = $this->googleSyncService->syncDrive(
+                        (int) $user->id,
+                        $token,
+                        (int) $request->input('drive.page_size', 50),
+                        $request->input('drive.order_by')
+                    );
+                    unset($errors['drive']);
+                }
+            } catch (Throwable $exception) {
+                // Keep original per-resource errors if refresh/retry fails.
+            }
+        }
+
         if ($payload === []) {
             return $this->error('Google sync failed for all requested services.', 400, $errors);
         }
@@ -649,5 +686,11 @@ class GoogleSyncController extends Controller
                 ]
                 : null,
         ];
+    }
+
+    private function isGoogleUnauthorizedMessage(string $message): bool
+    {
+        return str_contains($message, 'Google API error (401)')
+            || str_contains(strtolower($message), 'invalid authentication credentials');
     }
 }
