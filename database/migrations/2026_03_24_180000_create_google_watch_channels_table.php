@@ -8,9 +8,9 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('google_watch_channels', function (Blueprint $table): void {
+        Schema::connection('ai_mysql')->create('google_watch_channels', function (Blueprint $table): void {
             $table->id();
-            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('user_id')->constrained();
             $table->string('resource_type', 30); // calendar | drive
             $table->string('channel_id', 120)->unique();
             $table->string('resource_id', 255)->nullable();
