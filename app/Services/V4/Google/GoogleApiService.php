@@ -3,6 +3,7 @@
 namespace App\Services\V4\Google;
 
 use Illuminate\Http\Client\Factory as HttpFactory;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
@@ -32,7 +33,7 @@ class GoogleApiService
             $accessToken,
             [
                 'part' => 'snippet,statistics,contentDetails',
-                'mine' => true,
+                'mine' => 'true',
                 'maxResults' => min(50, max(1, $maxResults)),
             ]
         );
@@ -165,18 +166,31 @@ class GoogleApiService
         $body .= "Content-Type: {$fileMimeType}\r\n\r\n";
         $body .= file_get_contents($file->getRealPath()) ?: '';
         $body .= "\r\n--{$boundary}--";
+        $normalizedToken = $this->normalizeAccessToken($accessToken);
+        $this->assertValidAccessToken($normalizedToken);
+        $client = $this->googleClient($normalizedToken);
 
-        $response = $this->http
-            ->withHeaders([
-                'Authorization' => 'Bearer '.$this->normalizeAccessToken($accessToken),
-                'Accept' => 'application/json',
-            ])
-            ->timeout((int) config('services.google.timeout_seconds', 15))
+        Log::info('Google API Request', [
+            'method' => 'POST',
+            'url' => 'https://www.googleapis.com/upload/drive/v3/files',
+            'query' => ['uploadType' => 'multipart'],
+            'token_present' => $normalizedToken !== '',
+            'token_preview' => mb_substr($normalizedToken, 0, 20).'...',
+        ]);
+
+        $response = $client
             ->send('POST', 'https://www.googleapis.com/upload/drive/v3/files', [
                 'query' => ['uploadType' => 'multipart'],
                 'headers' => ['Content-Type' => "multipart/related; boundary={$boundary}"],
                 'body' => $body,
             ]);
+
+        Log::info('Google API Response', [
+            'method' => 'POST',
+            'url' => 'https://www.googleapis.com/upload/drive/v3/files',
+            'status' => $response->status(),
+            'is_json' => (string) $response->header('content-type', ''),
+        ]);
 
         $this->logGoogleApiResponse('POST', 'https://www.googleapis.com/upload/drive/v3/files', $response->status(), [
             'query' => ['uploadType' => 'multipart'],
@@ -344,26 +358,42 @@ class GoogleApiService
     ): array {
         $normalizedToken = $this->normalizeAccessToken($accessToken);
         $this->assertValidAccessToken($normalizedToken);
+        $client = $this->googleClient($normalizedToken);
+        $methodUpper = strtoupper($method);
 
-        $response = $this->http
-            ->withHeaders([
-                'Authorization' => 'Bearer '.$normalizedToken,
-                'Accept' => 'application/json',
-            ])
+        Log::info('Google API Request', [
+            'method' => $methodUpper,
+            'url' => $url,
+            'query' => $query,
+            'token_present' => $normalizedToken !== '',
+            'token_preview' => mb_substr($normalizedToken, 0, 20).'...',
+        ]);
+
+        $response = $client
             ->asJson()
-            ->timeout((int) config('services.google.timeout_seconds', 15))
-            ->send(strtoupper($method), $url, [
+            ->send($methodUpper, $url, [
                 'query' => $query,
                 'json' => $payload,
             ]);
 
-        $this->logGoogleApiResponse(strtoupper($method), $url, $response->status(), [
+        Log::info('Google API Response', [
+            'method' => $methodUpper,
+            'url' => $url,
+            'status' => $response->status(),
+            'is_json' => (string) $response->header('content-type', ''),
+        ]);
+
+        $this->logGoogleApiResponse($methodUpper, $url, $response->status(), [
             'query' => $query,
             'request' => $payload,
             'response' => $this->responseBodyForLog($response),
         ]);
 
         try {
+            if ($this->isHtmlResponse($response)) {
+                throw new \RuntimeException('Google API returned HTML -> Authorization header missing or malformed request', $response->status() ?: 400);
+            }
+
             $response->throw();
         } catch (RequestException $exception) {
             $body = $response->json();
@@ -499,5 +529,17 @@ class GoogleApiService
 
         return str_starts_with(strtolower($body), '<!doctype html')
             || str_starts_with(strtolower($body), '<html');
+    }
+
+    private function googleClient(string $accessToken): PendingRequest
+    {
+        if ($accessToken === '') {
+            throw new \RuntimeException('Google access token is missing', 422);
+        }
+
+        return $this->http
+            ->withToken($accessToken)
+            ->acceptJson()
+            ->timeout(30);
     }
 }
