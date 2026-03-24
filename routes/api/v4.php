@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('v4')->controller(GoogleSyncController::class)->group(function (): void {
     Route::post('google/webhook', 'webhook');
+    Route::get('google/oauth/callback', 'oauthCallback');
 });
 
 Route::prefix('v4')->middleware('auth:sanctum')->group(function (): void {

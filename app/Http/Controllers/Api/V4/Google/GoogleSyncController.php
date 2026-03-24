@@ -19,6 +19,7 @@ use App\Services\V4\Google\GoogleTokenService;
 use App\Services\V4\Google\GoogleWatchService;
 use App\Traits\ApiResponse;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use RuntimeException;
 use Throwable;
@@ -528,12 +529,41 @@ class GoogleSyncController extends Controller
         return response()->json(['message' => 'Webhook received.'], 200);
     }
 
+    public function oauthCallback(Request $request): JsonResponse
+    {
+        $error = $request->query('error');
+        if (is_string($error) && $error !== '') {
+            return response()->json([
+                'message' => 'Google OAuth callback returned an error.',
+                'success' => false,
+                'code' => 400,
+                'errors' => [
+                    'error' => $error,
+                    'error_description' => $request->query('error_description'),
+                ],
+            ], 400);
+        }
+
+        return response()->json([
+            'message' => 'Google OAuth callback received successfully.',
+            'success' => true,
+            'code' => 200,
+            'data' => [
+                'code' => $request->query('code'),
+                'state' => $request->query('state'),
+                'scope' => $request->query('scope'),
+                'hint' => 'Send this code to POST /api/v4/google/oauth/exchange-code with sanctum auth.',
+            ],
+        ], 200);
+    }
+
     private function resolveGoogleUrls(): array
     {
         return [
             'webhook_url' => (string) config('services.google.webhook_url'),
             'return_url' => (string) config('services.google.redirect_uri'),
             'oauth_exchange_endpoint' => url('/api/v4/google/oauth/exchange-code'),
+            'oauth_callback_endpoint' => url('/api/v4/google/oauth/callback'),
             'webhook_endpoint' => url('/api/v4/google/webhook'),
         ];
     }
