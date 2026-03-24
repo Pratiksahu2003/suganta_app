@@ -360,6 +360,7 @@ class GoogleApiService
         $this->assertValidAccessToken($normalizedToken);
         $client = $this->googleClient($normalizedToken);
         $methodUpper = strtoupper($method);
+        $query = $this->normalizeGoogleQueryParams($query);
 
         Log::info('Google API Request', [
             'method' => $methodUpper,
@@ -437,6 +438,22 @@ class GoogleApiService
         }
 
         return $response->json() ?? [];
+    }
+
+    private function normalizeGoogleQueryParams(array $query): array
+    {
+        foreach ($query as $key => $value) {
+            if (is_bool($value)) {
+                $query[$key] = $value ? 'true' : 'false';
+                continue;
+            }
+
+            if (is_array($value)) {
+                $query[$key] = $this->normalizeGoogleQueryParams($value);
+            }
+        }
+
+        return $query;
     }
 
     private function calendarBaseUrl(): string
