@@ -20,7 +20,7 @@ class GoogleApiService
                 'maxResults' => min(100, max(1, $maxResults)),
                 'singleEvents' => true,
                 'orderBy' => 'startTime',
-                'timeMin' => now()->toIso8601String(),
+                'timeMin' => now()->toIso8601ZuluString(),
             ]
         );
     }
@@ -44,6 +44,8 @@ class GoogleApiService
             'pageSize' => min(1000, max(1, $pageSize)),
             'fields' => 'files(id,name,mimeType,modifiedTime,size,webViewLink),nextPageToken',
             'q' => 'trashed=false',
+            'supportsAllDrives' => true,
+            'includeItemsFromAllDrives' => true,
         ];
 
         if ($orderBy) {
@@ -128,6 +130,8 @@ class GoogleApiService
             'q' => $googleQuery,
             'pageSize' => min(1000, max(1, $pageSize)),
             'fields' => 'files(id,name,mimeType,modifiedTime,size,webViewLink,parents),nextPageToken',
+            'supportsAllDrives' => true,
+            'includeItemsFromAllDrives' => true,
         ];
 
         if ($pageToken) {
@@ -163,8 +167,10 @@ class GoogleApiService
         $body .= "\r\n--{$boundary}--";
 
         $response = $this->http
-            ->withToken($accessToken)
-            ->acceptJson()
+            ->withHeaders([
+                'Authorization' => 'Bearer '.$this->normalizeAccessToken($accessToken),
+                'Accept' => 'application/json',
+            ])
             ->timeout((int) config('services.google.timeout_seconds', 15))
             ->send('POST', 'https://www.googleapis.com/upload/drive/v3/files', [
                 'query' => ['uploadType' => 'multipart'],
@@ -263,7 +269,8 @@ class GoogleApiService
     ): array {
         $startToken = $this->requestJson(
             $this->driveBaseUrl().'/changes/startPageToken',
-            $accessToken
+            $accessToken,
+            ['supportsAllDrives' => true]
         );
         $pageToken = (string) data_get($startToken, 'startPageToken', '');
         if ($pageToken === '') {
@@ -274,7 +281,11 @@ class GoogleApiService
             'post',
             $this->driveBaseUrl().'/changes/watch',
             $accessToken,
-            ['pageToken' => $pageToken],
+            [
+                'pageToken' => $pageToken,
+                'supportsAllDrives' => true,
+                'includeItemsFromAllDrives' => true,
+            ],
             [
                 'id' => $channelId,
                 'type' => 'web_hook',
@@ -331,9 +342,14 @@ class GoogleApiService
         array $query = [],
         array $payload = []
     ): array {
+        $normalizedToken = $this->normalizeAccessToken($accessToken);
+        $this->assertValidAccessToken($normalizedToken);
+
         $response = $this->http
-            ->withToken($accessToken)
-            ->acceptJson()
+            ->withHeaders([
+                'Authorization' => 'Bearer '.$normalizedToken,
+                'Accept' => 'application/json',
+            ])
             ->asJson()
             ->timeout((int) config('services.google.timeout_seconds', 15))
             ->send(strtoupper($method), $url, [
@@ -353,6 +369,7 @@ class GoogleApiService
             $body = $response->json();
             $status = $response->status() ?: 400;
             $message = 'Google API request failed.';
+            $isHtmlResponse = $this->isHtmlResponse($response);
 
             if (is_array($body)) {
                 $message = (string) data_get($body, 'error.message')
@@ -364,6 +381,17 @@ class GoogleApiService
                 if ($rawBody !== '') {
                     $message = mb_substr($rawBody, 0, 350);
                 }
+            }
+
+            if ($isHtmlResponse) {
+                Log::error('Google API returned HTML response (malformed request or upstream mismatch).', [
+                    'method' => strtoupper($method),
+                    'url' => $url,
+                    'status' => $status,
+                    'query' => $query,
+                    'request' => $payload,
+                    'response_snippet' => mb_substr(trim((string) $response->body()), 0, 700),
+                ]);
             }
 
             throw new \RuntimeException("Google API error ({$status}): {$message}", $status, $exception);
@@ -436,5 +464,40 @@ class GoogleApiService
             'status' => $status,
             ...$context,
         ]);
+    }
+
+    private function normalizeAccessToken(string $token): string
+    {
+        $value = trim($token);
+        if (str_starts_with(strtolower($value), 'bearer ')) {
+            $value = trim(substr($value, 7));
+        }
+
+        // Remove line breaks/control chars that can break Authorization header formatting.
+        return (string) preg_replace('/[\x00-\x1F\x7F]/u', '', $value);
+    }
+
+    private function assertValidAccessToken(string $token): void
+    {
+        if ($token === '') {
+            throw new \RuntimeException('Google access token is missing. Connect Google account or refresh token first.', 422);
+        }
+
+        if (mb_strlen($token) < 20) {
+            throw new \RuntimeException('Google access token appears invalid (too short).', 422);
+        }
+    }
+
+    private function isHtmlResponse(\Illuminate\Http\Client\Response $response): bool
+    {
+        $contentType = strtolower((string) $response->header('Content-Type', ''));
+        if (str_contains($contentType, 'text/html')) {
+            return true;
+        }
+
+        $body = ltrim((string) $response->body());
+
+        return str_starts_with(strtolower($body), '<!doctype html')
+            || str_starts_with(strtolower($body), '<html');
     }
 }

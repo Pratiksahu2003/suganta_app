@@ -24,11 +24,11 @@ class GoogleTokenService
         ?string $googleCalendarId = null
     ): User {
         $attributes = [
-            'google_refresh_token' => $refreshToken,
+            'google_refresh_token' => $this->normalizeToken($refreshToken),
         ];
 
         if ($accessToken) {
-            $attributes['google_access_token'] = $accessToken;
+            $attributes['google_access_token'] = $this->normalizeToken($accessToken);
         }
 
         if ($expiresIn) {
@@ -64,14 +64,14 @@ class GoogleTokenService
     public function getValidAccessToken(User $user, ?string $fallbackAccessToken = null): string
     {
         if ($fallbackAccessToken !== null && trim($fallbackAccessToken) !== '') {
-            return $fallbackAccessToken;
+            return $this->normalizeToken($fallbackAccessToken);
         }
 
         $storedAccessToken = $user->google_access_token;
         $expiresAt = $user->google_token_expires_at;
 
         if ($storedAccessToken && $expiresAt && $expiresAt->gt(now()->addMinutes(2))) {
-            return $storedAccessToken;
+            return $this->normalizeToken($storedAccessToken);
         }
 
         return $this->refreshAccessToken($user);
@@ -123,11 +123,11 @@ class GoogleTokenService
         $expiry = CarbonImmutable::now()->addSeconds(max(60, $expiresIn));
 
         $user->forceFill([
-            'google_access_token' => $newAccessToken,
+            'google_access_token' => $this->normalizeToken($newAccessToken),
             'google_token_expires_at' => $expiry,
         ])->save();
 
-        return $newAccessToken;
+        return $this->normalizeToken($newAccessToken);
     }
 
     public function exchangeAuthorizationCode(User $user, string $code, ?string $redirectUri = null): array
@@ -173,12 +173,12 @@ class GoogleTokenService
         }
 
         $payload = [
-            'google_access_token' => $accessToken,
+            'google_access_token' => $this->normalizeToken($accessToken),
             'google_token_expires_at' => CarbonImmutable::now()->addSeconds(max(60, $expiresIn)),
         ];
 
         if ($refreshToken !== '') {
-            $payload['google_refresh_token'] = $refreshToken;
+            $payload['google_refresh_token'] = $this->normalizeToken($refreshToken);
         }
 
         $user->forceFill($payload)->save();
@@ -345,5 +345,15 @@ class GoogleTokenService
             'status' => $status,
             ...$context,
         ]);
+    }
+
+    private function normalizeToken(string $token): string
+    {
+        $value = trim($token);
+        if (str_starts_with(strtolower($value), 'bearer ')) {
+            $value = trim(substr($value, 7));
+        }
+
+        return (string) preg_replace('/[\x00-\x1F\x7F]/u', '', $value);
     }
 }

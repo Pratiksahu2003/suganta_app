@@ -191,10 +191,54 @@ This document reflects the latest routes from `routes/api/v4.php` and current co
   - `drive.order_by` (string, optional)
   - `drive.page_token` (string, optional)
   - `drive.query` (string, optional)
-- Response data:
-  - `calendar` (object, when requested)
-  - `youtube` (object, when requested)
-  - `drive` (object, when requested)
+- Response behavior:
+  - Returns partial success when one service fails and others succeed.
+  - Returns full error when all requested services fail.
+- Success / partial response data:
+  - `resources` (object)
+    - `calendar` (object, when requested + success)
+    - `youtube` (object, when requested + success)
+    - `drive` (object, when requested + success)
+  - `errors` (object)
+    - `calendar` (string, when failed)
+    - `youtube` (string, when failed)
+    - `drive` (string, when failed)
+
+Example partial success:
+
+```json
+{
+  "message": "Google sync partially completed.",
+  "success": true,
+  "code": 200,
+  "data": {
+    "resources": {
+      "calendar": {
+        "items": []
+      }
+    },
+    "errors": {
+      "youtube": "Google API error (403): Request had insufficient authentication scopes.",
+      "drive": "Google API error (400): ... "
+    }
+  }
+}
+```
+
+Example full failure:
+
+```json
+{
+  "message": "Google sync failed for all requested services.",
+  "success": false,
+  "code": 400,
+  "errors": {
+    "calendar": "Google API error (400): ...",
+    "youtube": "Google API error (400): ...",
+    "drive": "Google API error (400): ..."
+  }
+}
+```
 
 ---
 
@@ -353,3 +397,24 @@ This document reflects the latest routes from `routes/api/v4.php` and current co
 - `GOOGLE_WEBHOOK_REPLAY_WINDOW_SECONDS`
 - `GOOGLE_WATCH_TOKEN_TTL_SECONDS`
 - `GOOGLE_WATCH_RENEW_BEFORE_SECONDS`
+
+---
+
+## Current request/response handling notes
+
+- Access token normalization:
+  - If `access_token` starts with `Bearer `, backend strips prefix automatically.
+  - Control characters / line breaks are removed before sending to Google.
+  - Empty or too-short token is rejected with clear `422` style message.
+- Calendar request format:
+  - `timeMin` is sent as RFC3339 Z format.
+  - `maxResults`, `singleEvents`, `orderBy=startTime` are always included.
+- Drive request format:
+  - Drive list/search internally includes all required query fields and all-drives flags.
+  - Start page token call includes `supportsAllDrives=true`.
+- YouTube request format:
+  - `part=snippet,statistics,contentDetails` and `mine=true` are always included.
+  - Authorization header is always attached from normalized token.
+- Logging (server side):
+  - Every Google API/OAuth call logs URL, method, query/request payload, status, and trimmed response body.
+  - HTML responses from Google are detected and logged as malformed/upstream mismatch for easier production debugging.
