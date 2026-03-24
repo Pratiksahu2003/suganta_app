@@ -5,7 +5,9 @@ namespace App\Services\V4\Google;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Factory as HttpFactory;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Str;
 use RuntimeException;
 
 class GoogleTokenService
@@ -178,6 +180,52 @@ class GoogleTokenService
         ];
     }
 
+    public function buildAuthorizationUrl(User $user, ?string $redirectUri = null): array
+    {
+        $oauth = $this->resolveOAuthClientConfig();
+        $clientId = $oauth['client_id'];
+        $resolvedRedirectUri = $redirectUri ?: ((string) config('services.google.redirect_uri') ?: $oauth['redirect_uri']);
+        $authorizeUrl = (string) config('services.google.oauth_authorize_url', 'https://accounts.google.com/o/oauth2/v2/auth');
+
+        if ($clientId === '' || $resolvedRedirectUri === '') {
+            throw new RuntimeException('Google OAuth client or redirect URI is not configured.', 500);
+        }
+
+        $state = Str::random(40);
+        $this->rememberOauthState((int) $user->id, $state);
+        $scopes = $this->defaultScopes();
+
+        $query = http_build_query([
+            'client_id' => $clientId,
+            'redirect_uri' => $resolvedRedirectUri,
+            'response_type' => 'code',
+            'scope' => implode(' ', $scopes),
+            'access_type' => 'offline',
+            'prompt' => 'consent',
+            'include_granted_scopes' => 'true',
+            'state' => $state,
+        ]);
+
+        return [
+            'oauth_url' => $authorizeUrl.'?'.$query,
+            'state' => $state,
+            'redirect_uri' => $resolvedRedirectUri,
+            'scopes' => $scopes,
+        ];
+    }
+
+    public function validateAndConsumeOauthState(User $user, ?string $state): void
+    {
+        if (! is_string($state) || trim($state) === '') {
+            throw new RuntimeException('OAuth state is required.', 422);
+        }
+
+        $cacheKey = $this->oauthStateCacheKey((int) $user->id, $state);
+        if (! Cache::pull($cacheKey)) {
+            throw new RuntimeException('OAuth state is invalid or expired. Please restart OAuth flow.', 422);
+        }
+    }
+
     public function status(User $user): array
     {
         return [
@@ -235,5 +283,34 @@ class GoogleTokenService
         }
 
         return base_path($path);
+    }
+
+    private function rememberOauthState(int $userId, string $state): void
+    {
+        $ttl = max(60, (int) config('services.google.oauth_state_ttl_seconds', 600));
+        Cache::put($this->oauthStateCacheKey($userId, $state), true, now()->addSeconds($ttl));
+    }
+
+    private function oauthStateCacheKey(int $userId, string $state): string
+    {
+        return 'google:oauth:state:'.$userId.':'.$state;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function defaultScopes(): array
+    {
+        $configured = config('services.google.default_scopes', []);
+        if (is_array($configured) && $configured !== []) {
+            return array_values(array_filter(array_map('strval', $configured)));
+        }
+
+        return [
+            'https://www.googleapis.com/auth/calendar',
+            'https://www.googleapis.com/auth/drive',
+            'https://www.googleapis.com/auth/youtube.readonly',
+            'https://www.googleapis.com/auth/userinfo.email',
+        ];
     }
 }

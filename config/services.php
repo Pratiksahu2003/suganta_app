@@ -53,6 +53,12 @@ return [
         'client_id' => env('GOOGLE_CLIENT_ID'),
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),
         'oauth_token_url' => env('GOOGLE_OAUTH_TOKEN_URL', 'https://oauth2.googleapis.com/token'),
+        'oauth_authorize_url' => env('GOOGLE_OAUTH_AUTHORIZE_URL', 'https://accounts.google.com/o/oauth2/v2/auth'),
+        'oauth_state_ttl_seconds' => env('GOOGLE_OAUTH_STATE_TTL_SECONDS', 600),
+        'default_scopes' => array_values(array_filter(array_map(
+            static fn (string $scope): string => trim($scope),
+            explode(',', (string) env('GOOGLE_DEFAULT_SCOPES', 'https://www.googleapis.com/auth/calendar,https://www.googleapis.com/auth/drive,https://www.googleapis.com/auth/youtube.readonly,https://www.googleapis.com/auth/userinfo.email'))
+        ))),
         'redirect_uri' => env('GOOGLE_REDIRECT_URI'),
         'webhook_url' => env('GOOGLE_WEBHOOK_URL'),
         'webhook_secret' => env('GOOGLE_WEBHOOK_SECRET'),

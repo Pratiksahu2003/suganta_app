@@ -11,6 +11,7 @@ Route::prefix('v4')->controller(GoogleSyncController::class)->group(function ():
 Route::prefix('v4')->middleware('auth:sanctum')->group(function (): void {
     Route::prefix('google')->controller(GoogleSyncController::class)->group(function (): void {
         Route::post('connect', 'connect');
+        Route::get('oauth/url', 'oauthUrl');
         Route::post('oauth/exchange-code', 'exchangeCode');
         Route::delete('disconnect', 'disconnect');
         Route::get('status', 'status');

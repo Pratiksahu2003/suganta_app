@@ -56,6 +56,7 @@ class GoogleSyncController extends Controller
         $user = Auth::user();
 
         try {
+            $this->googleTokenService->validateAndConsumeOauthState($user, $request->input('state'));
             $data = $this->googleTokenService->exchangeAuthorizationCode(
                 $user,
                 (string) $request->string('code'),
@@ -68,6 +69,25 @@ class GoogleSyncController extends Controller
         }
 
         return $this->success('Google authorization code exchanged successfully.', $data);
+    }
+
+    public function oauthUrl(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = Auth::user();
+
+        try {
+            $payload = $this->googleTokenService->buildAuthorizationUrl(
+                $user,
+                $request->input('redirect_uri')
+            );
+        } catch (RuntimeException $exception) {
+            return $this->error($exception->getMessage(), $exception->getCode() ?: 400);
+        } catch (Throwable $exception) {
+            return $this->serverError('Google OAuth URL generation failed.', $exception->getMessage());
+        }
+
+        return $this->success('Google OAuth URL generated successfully.', $payload);
     }
 
     public function disconnect(): JsonResponse
@@ -552,7 +572,7 @@ class GoogleSyncController extends Controller
                 'code' => $request->query('code'),
                 'state' => $request->query('state'),
                 'scope' => $request->query('scope'),
-                'hint' => 'Send this code to POST /api/v4/google/oauth/exchange-code with sanctum auth.',
+                'hint' => 'Send code + state to POST /api/v4/google/oauth/exchange-code with sanctum auth.',
             ],
         ], 200);
     }
@@ -563,6 +583,7 @@ class GoogleSyncController extends Controller
             'webhook_url' => (string) config('services.google.webhook_url'),
             'return_url' => (string) config('services.google.redirect_uri'),
             'oauth_exchange_endpoint' => url('/api/v4/google/oauth/exchange-code'),
+            'oauth_url_endpoint' => url('/api/v4/google/oauth/url'),
             'oauth_callback_endpoint' => url('/api/v4/google/oauth/callback'),
             'webhook_endpoint' => url('/api/v4/google/webhook'),
         ];

@@ -21,25 +21,6 @@ class OtpServiceTest extends TestCase
     {
         parent::setUp();
         
-        // Create otps table for testing
-        \Illuminate\Support\Facades\Schema::create('otps', function ($table) {
-            $table->id();
-            $table->foreignId('user_id');
-            $table->string('identifier');
-            $table->string('type');
-            $table->string('otp');
-            $table->timestamp('expires_at');
-            $table->boolean('verified')->default(false);
-            $table->timestamps();
-        });
-
-        // Add phone to users table if it doesn't exist
-        if (!\Illuminate\Support\Facades\Schema::hasColumn('users', 'phone')) {
-            \Illuminate\Support\Facades\Schema::table('users', function ($table) {
-                $table->string('phone')->nullable();
-            });
-        }
-        
         $this->smsService = $this->createMock(SmsCountryService::class);
         $this->otpService = new OtpService($this->smsService);
         

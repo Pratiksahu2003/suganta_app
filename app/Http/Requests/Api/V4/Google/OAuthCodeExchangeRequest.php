@@ -16,6 +16,7 @@ class OAuthCodeExchangeRequest extends FormRequest
         return [
             'code' => ['required', 'string', 'min:20'],
             'redirect_uri' => ['nullable', 'url', 'max:500'],
+            'state' => ['nullable', 'string', 'min:16', 'max:255'],
         ];
     }
 }

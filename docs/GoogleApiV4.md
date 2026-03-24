@@ -89,7 +89,17 @@ final dio = Dio(BaseOptions(
 - **Use:** Exchange OAuth authorization code on backend.
 - **Body params:**
   - `code` (string, required)
+  - `state` (string, required; from oauth-url response)
   - `redirect_uri` (string/url, optional)
+
+### 2.1) `GET /api/v4/google/oauth/url`
+- **Use:** Generate properly configured Google OAuth consent URL.
+- **Body:** none
+- **Returns:**
+  - `oauth_url`
+  - `state` (must be sent to `oauth/exchange-code`)
+  - `redirect_uri`
+  - `scopes`
 
 ### 3.1) `GET /api/v4/google/oauth/callback` (public)
 - **Use:** This should be set as `GOOGLE_REDIRECT_URI` in Google OAuth Console.
@@ -304,8 +314,11 @@ try {
 - `GOOGLE_CLIENT_ID` (optional fallback if JSON missing)
 - `GOOGLE_CLIENT_SECRET` (optional fallback if JSON missing)
 - `GOOGLE_OAUTH_TOKEN_URL`
+- `GOOGLE_OAUTH_AUTHORIZE_URL`
 - `GOOGLE_REDIRECT_URI`
   - Recommended: `https://your-domain.com/api/v4/google/oauth/callback`
+- `GOOGLE_OAUTH_STATE_TTL_SECONDS`
+- `GOOGLE_DEFAULT_SCOPES`
 - `GOOGLE_WEBHOOK_URL`
 - `GOOGLE_WEBHOOK_SECRET`
 - `GOOGLE_WEBHOOK_REPLAY_WINDOW_SECONDS`

@@ -11,10 +11,20 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (! Schema::hasTable('exam_subjects')) {
+            return;
+        }
+
         Schema::table('exam_subjects', function (Blueprint $table) {
-            $table->integer('weightage')->nullable()->after('is_mandatory');
-            $table->integer('marks')->nullable()->after('weightage');
-            $table->boolean('is_optional')->default(false)->after('marks');
+            if (! Schema::hasColumn('exam_subjects', 'weightage')) {
+                $table->integer('weightage')->nullable()->after('is_mandatory');
+            }
+            if (! Schema::hasColumn('exam_subjects', 'marks')) {
+                $table->integer('marks')->nullable()->after('weightage');
+            }
+            if (! Schema::hasColumn('exam_subjects', 'is_optional')) {
+                $table->boolean('is_optional')->default(false)->after('marks');
+            }
         });
     }
 
@@ -23,8 +33,25 @@ return new class extends Migration
      */
     public function down(): void
     {
+        if (! Schema::hasTable('exam_subjects')) {
+            return;
+        }
+
         Schema::table('exam_subjects', function (Blueprint $table) {
-            $table->dropColumn(['weightage', 'marks', 'is_optional']);
+            $drop = [];
+            if (Schema::hasColumn('exam_subjects', 'weightage')) {
+                $drop[] = 'weightage';
+            }
+            if (Schema::hasColumn('exam_subjects', 'marks')) {
+                $drop[] = 'marks';
+            }
+            if (Schema::hasColumn('exam_subjects', 'is_optional')) {
+                $drop[] = 'is_optional';
+            }
+
+            if ($drop !== []) {
+                $table->dropColumn($drop);
+            }
         });
     }
 }; 

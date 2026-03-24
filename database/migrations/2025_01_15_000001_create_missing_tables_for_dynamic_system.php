@@ -20,7 +20,6 @@ return new class extends Migration
                 $table->timestamps();
                 
                 $table->unique(['user_id', 'favoriteable_type', 'favoriteable_id']);
-                $table->index(['favoriteable_type', 'favoriteable_id']);
             });
         }
 
@@ -106,7 +105,6 @@ return new class extends Migration
                 $table->timestamp('read_at')->nullable();
                 $table->timestamps();
                 
-                $table->index(['notifiable_type', 'notifiable_id']);
                 $table->index('read_at');
             });
         }

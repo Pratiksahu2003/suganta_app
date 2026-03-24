@@ -11,6 +11,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (! Schema::hasTable('cities') || ! Schema::hasColumn('cities', 'name')) {
+            return;
+        }
+
         Schema::table('cities', function (Blueprint $table) {
             $table->renameColumn('name', 'city_name');
         });
@@ -21,6 +25,10 @@ return new class extends Migration
      */
     public function down(): void
     {
+        if (! Schema::hasTable('cities') || ! Schema::hasColumn('cities', 'city_name')) {
+            return;
+        }
+
         Schema::table('cities', function (Blueprint $table) {
             $table->renameColumn('city_name', 'name');
         });

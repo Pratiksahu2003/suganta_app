@@ -12,6 +12,13 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // This migration is a one-shot "full bootstrap" schema.
+        // In normal app evolution, dedicated migrations already create core tables.
+        // Skip to avoid duplicate table errors during test migrations.
+        if (Schema::hasTable('users')) {
+            return;
+        }
+
         // 1. Create Users Table (Enhanced)
         Schema::create('users', function (Blueprint $table) {
             $table->id();

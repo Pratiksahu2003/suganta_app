@@ -13,53 +13,6 @@ class OtpLoginTest extends TestCase
 {
     use RefreshDatabase;
 
-    protected function setUp(): void
-    {
-        parent::setUp();
-        
-        // Ensure necessary tables exist (copied from TwoFactorLoginTest/ApiResponseTest setup)
-        if (\Schema::hasTable('users')) {
-            \Schema::table('users', function (\Illuminate\Database\Schema\Blueprint $table) {
-                if (!\Schema::hasColumn('users', 'is_active')) {
-                    $table->boolean('is_active')->default(true);
-                }
-                if (!\Schema::hasColumn('users', 'role')) {
-                    $table->string('role')->nullable();
-                }
-                if (!\Schema::hasColumn('users', 'phone')) {
-                    $table->string('phone')->nullable();
-                }
-                if (!\Schema::hasColumn('users', 'verification_status')) {
-                    $table->string('verification_status')->default('pending');
-                }
-                if (!\Schema::hasColumn('users', 'registration_fee_status')) {
-                    $table->string('registration_fee_status')->nullable();
-                }
-                if (!\Schema::hasColumn('users', 'phone_verified_at')) {
-                    $table->timestamp('phone_verified_at')->nullable();
-                }
-                if (!\Schema::hasColumn('users', 'preferences')) {
-                    $table->json('preferences')->nullable();
-                }
-            });
-        }
-        
-        if (!\Schema::hasTable('otps')) {
-            \Schema::create('otps', function (\Illuminate\Database\Schema\Blueprint $table) {
-                $table->id();
-                $table->string('identifier');
-                $table->string('type');
-                $table->string('otp');
-                $table->timestamp('expires_at');
-                $table->boolean('verified')->default(false);
-                $table->boolean('is_used')->default(false);
-                $table->integer('attempt_count')->default(0);
-                $table->unsignedBigInteger('user_id')->nullable();
-                $table->timestamps();
-            });
-        }
-    }
-
     public function test_send_otp_via_email_for_valid_email_user()
     {
         $user = User::factory()->create([
