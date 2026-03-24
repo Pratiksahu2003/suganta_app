@@ -13,7 +13,7 @@ class GoogleApiService
     public function listCalendarEvents(string $accessToken, int $maxResults = 20): array
     {
         return $this->requestJson(
-            config('services.google.calendar_base_url', 'https://www.googleapis.com/calendar/v3').'/calendars/primary/events',
+            $this->calendarBaseUrl().'/calendars/primary/events',
             $accessToken,
             [
                 'maxResults' => min(100, max(1, $maxResults)),
@@ -27,7 +27,7 @@ class GoogleApiService
     public function listYoutubeChannels(string $accessToken, int $maxResults = 10): array
     {
         return $this->requestJson(
-            config('services.google.youtube_base_url', 'https://www.googleapis.com/youtube/v3').'/channels',
+            $this->youtubeBaseUrl().'/channels',
             $accessToken,
             [
                 'part' => 'snippet,statistics,contentDetails',
@@ -50,7 +50,7 @@ class GoogleApiService
         }
 
         return $this->requestJson(
-            config('services.google.drive_base_url', 'https://www.googleapis.com/drive/v3').'/files',
+            $this->driveBaseUrl().'/files',
             $accessToken,
             $query
         );
@@ -59,7 +59,7 @@ class GoogleApiService
     public function getCalendarEvent(string $accessToken, string $eventId): array
     {
         return $this->requestJson(
-            config('services.google.calendar_base_url', 'https://www.googleapis.com/calendar/v3').'/calendars/primary/events/'.$eventId,
+            $this->calendarBaseUrl().'/calendars/primary/events/'.$eventId,
             $accessToken
         );
     }
@@ -68,7 +68,7 @@ class GoogleApiService
     {
         return $this->requestJsonByMethod(
             'post',
-            config('services.google.calendar_base_url', 'https://www.googleapis.com/calendar/v3').'/calendars/primary/events',
+            $this->calendarBaseUrl().'/calendars/primary/events',
             $accessToken,
             [],
             $payload
@@ -79,7 +79,7 @@ class GoogleApiService
     {
         return $this->requestJsonByMethod(
             'patch',
-            config('services.google.calendar_base_url', 'https://www.googleapis.com/calendar/v3').'/calendars/primary/events/'.$eventId,
+            $this->calendarBaseUrl().'/calendars/primary/events/'.$eventId,
             $accessToken,
             [],
             $payload
@@ -90,7 +90,7 @@ class GoogleApiService
     {
         $this->requestJsonByMethod(
             'delete',
-            config('services.google.calendar_base_url', 'https://www.googleapis.com/calendar/v3').'/calendars/primary/events/'.$eventId,
+            $this->calendarBaseUrl().'/calendars/primary/events/'.$eventId,
             $accessToken
         );
     }
@@ -108,7 +108,7 @@ class GoogleApiService
 
         return $this->requestJsonByMethod(
             'post',
-            config('services.google.drive_base_url', 'https://www.googleapis.com/drive/v3').'/files',
+            $this->driveBaseUrl().'/files',
             $accessToken,
             [],
             $payload
@@ -138,7 +138,7 @@ class GoogleApiService
         }
 
         return $this->requestJson(
-            config('services.google.drive_base_url', 'https://www.googleapis.com/drive/v3').'/files',
+            $this->driveBaseUrl().'/files',
             $accessToken,
             $params
         );
@@ -189,7 +189,7 @@ class GoogleApiService
     {
         return $this->requestJsonByMethod(
             'patch',
-            config('services.google.drive_base_url', 'https://www.googleapis.com/drive/v3').'/files/'.$fileId,
+            $this->driveBaseUrl().'/files/'.$fileId,
             $accessToken,
             array_filter([
                 'addParents' => $newParentId,
@@ -209,7 +209,7 @@ class GoogleApiService
     ): array {
         return $this->requestJsonByMethod(
             'post',
-            config('services.google.drive_base_url', 'https://www.googleapis.com/drive/v3').'/files/'.$fileId.'/permissions',
+            $this->driveBaseUrl().'/files/'.$fileId.'/permissions',
             $accessToken,
             ['sendNotificationEmail' => $sendNotificationEmail],
             [
@@ -229,7 +229,7 @@ class GoogleApiService
     ): array {
         return $this->requestJsonByMethod(
             'post',
-            config('services.google.calendar_base_url', 'https://www.googleapis.com/calendar/v3').'/calendars/primary/events/watch',
+            $this->calendarBaseUrl().'/calendars/primary/events/watch',
             $accessToken,
             [],
             [
@@ -250,7 +250,7 @@ class GoogleApiService
         int $ttlSeconds
     ): array {
         $startToken = $this->requestJson(
-            config('services.google.drive_base_url', 'https://www.googleapis.com/drive/v3').'/changes/startPageToken',
+            $this->driveBaseUrl().'/changes/startPageToken',
             $accessToken
         );
         $pageToken = (string) data_get($startToken, 'startPageToken', '');
@@ -260,7 +260,7 @@ class GoogleApiService
 
         return $this->requestJsonByMethod(
             'post',
-            config('services.google.drive_base_url', 'https://www.googleapis.com/drive/v3').'/changes/watch',
+            $this->driveBaseUrl().'/changes/watch',
             $accessToken,
             ['pageToken' => $pageToken],
             [
@@ -291,7 +291,7 @@ class GoogleApiService
     {
         return $this->requestJsonByMethod(
             'patch',
-            config('services.google.drive_base_url', 'https://www.googleapis.com/drive/v3').'/files/'.$fileId,
+            $this->driveBaseUrl().'/files/'.$fileId,
             $accessToken,
             [],
             ['name' => $name]
@@ -302,7 +302,7 @@ class GoogleApiService
     {
         $this->requestJsonByMethod(
             'delete',
-            config('services.google.drive_base_url', 'https://www.googleapis.com/drive/v3').'/files/'.$fileId,
+            $this->driveBaseUrl().'/files/'.$fileId,
             $accessToken
         );
     }
@@ -356,5 +356,44 @@ class GoogleApiService
         }
 
         return $response->json() ?? [];
+    }
+
+    private function calendarBaseUrl(): string
+    {
+        return $this->resolveGoogleApiBaseUrl(
+            (string) config('services.google.calendar_base_url'),
+            'https://www.googleapis.com/calendar/v3'
+        );
+    }
+
+    private function youtubeBaseUrl(): string
+    {
+        return $this->resolveGoogleApiBaseUrl(
+            (string) config('services.google.youtube_base_url'),
+            'https://www.googleapis.com/youtube/v3'
+        );
+    }
+
+    private function driveBaseUrl(): string
+    {
+        return $this->resolveGoogleApiBaseUrl(
+            (string) config('services.google.drive_base_url'),
+            'https://www.googleapis.com/drive/v3'
+        );
+    }
+
+    private function resolveGoogleApiBaseUrl(string $configuredUrl, string $fallbackUrl): string
+    {
+        $trimmed = rtrim(trim($configuredUrl), '/');
+        if ($trimmed === '') {
+            return $fallbackUrl;
+        }
+
+        $host = parse_url($trimmed, PHP_URL_HOST);
+        if (! is_string($host) || ! str_contains(strtolower($host), 'googleapis.com')) {
+            return $fallbackUrl;
+        }
+
+        return $trimmed;
     }
 }
