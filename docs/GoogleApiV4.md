@@ -1,322 +1,351 @@
-# Google API v4 (Flutter Guide)
+# Google API v4 (Current)
 
-This is the full Flutter implementation guide for all routes in `routes/api/v4.php`.
+This document reflects the latest routes from `routes/api/v4.php` and current controller behavior.
 
-## Base setup
+## Base
 
-- Base URL: `https://your-domain.com/api/v4/google`
-- Auth header for protected routes: `Authorization: Bearer {sanctum_token}`
-- Default content type: `application/json`
-- Upload endpoint uses `multipart/form-data`
+- Base URL: `/api/v4/google`
+- Auth: `Authorization: Bearer {sanctum_token}` for protected routes
+- Content types:
+  - JSON for most endpoints
+  - `multipart/form-data` for drive upload
 
-## Standard response envelope
+## Standard response format
 
-Success:
+### Success
 
 ```json
 {
-  "message": "Some success message",
+  "message": "Success message",
   "success": true,
   "code": 200,
   "data": {}
 }
 ```
 
-Error:
+### Error
 
 ```json
 {
-  "message": "Validation failed",
+  "message": "Readable error message",
   "success": false,
   "code": 422,
   "errors": {
-    "field": ["The field is required."]
+    "field": [
+      "Validation message"
+    ]
   }
 }
 ```
 
-## Flutter (Dio) base client
-
-```dart
-final dio = Dio(BaseOptions(
-  baseUrl: 'https://your-domain.com/api/v4/google',
-  headers: {
-    'Accept': 'application/json',
-    'Authorization': 'Bearer $token',
-  },
-));
-```
-
 ---
 
-## Public route (no sanctum)
+## Public endpoints
 
-### 1) `POST /api/v4/google/webhook`
-- **Use:** Google server sends push notifications.
-- **Called by:** Google only (not your mobile app).
-- **Request body:** none from app side.
-- **Response example:**
-
-```json
-{ "message": "Webhook received." }
-```
-
----
-
-## Protected routes (sanctum required)
-
-### 2) `POST /api/v4/google/connect`
-- **Use:** Save Google refresh token + optional access token metadata.
-- **Body params:**
-  - `refresh_token` (string, required)
-  - `access_token` (string, optional)
-  - `expires_in` (int, optional)
-  - `google_email` (string/email, optional)
-  - `google_calendar_id` (string, optional)
-- **Flutter body:**
+### `POST /api/v4/google/webhook`
+- Auth: no
+- Query fields: none
+- Body fields: none (called by Google servers)
+- Response:
 
 ```json
 {
-  "refresh_token": "1//refresh...",
-  "access_token": "ya29.access...",
-  "expires_in": 3600,
-  "google_email": "user@gmail.com",
-  "google_calendar_id": "primary"
+  "message": "Webhook received."
 }
 ```
 
-### 3) `POST /api/v4/google/oauth/exchange-code`
-- **Use:** Exchange OAuth authorization code on backend.
-- **Body params:**
-  - `code` (string, required)
-  - `state` (string, required; from oauth-url response)
-  - `redirect_uri` (string/url, optional)
-
-### 2.1) `GET /api/v4/google/oauth/url`
-- **Use:** Generate properly configured Google OAuth consent URL.
-- **Body:** none
-- **Returns:**
-  - `oauth_url`
-  - `state` (must be sent to `oauth/exchange-code`)
-  - `redirect_uri`
-  - `scopes`
-
-### 3.1) `GET /api/v4/google/oauth/callback` (public)
-- **Use:** This should be set as `GOOGLE_REDIRECT_URI` in Google OAuth Console.
-- **Auth:** Not required.
-- **Query params from Google:** `code`, `scope`, `state`, `error`, `error_description`
-- **Flow:** App receives `code` here, then calls `POST /api/v4/google/oauth/exchange-code` with sanctum auth.
-
-### 4) `DELETE /api/v4/google/disconnect`
-- **Use:** Remove linked Google account tokens.
-- **Body:** none.
-
-### 5) `GET /api/v4/google/status`
-- **Use:** Token status + watch channel list.
-- **Body:** none.
-
-### 6) `GET /api/v4/google/urls`
-- **Use:** Return configured webhook and return URL values.
-- **Body:** none.
-- **Response `data`:**
-  - `webhook_url`
-  - `return_url`
-  - `oauth_exchange_endpoint`
-  - `webhook_endpoint`
-
-### 7) `POST /api/v4/google/watch`
-- **Use:** Start Google push watch channel.
-- **Body params:**
-  - `resource_type` (`calendar|drive`, required)
-  - `ttl_seconds` (int, optional)
-
-### 8) `DELETE /api/v4/google/watch/{channelId}`
-- **Use:** Stop a watch channel.
-- **Path params:**
-  - `channelId` (string, required)
-
-### 9) `POST /api/v4/google/token/refresh`
-- **Use:** Force refresh of Google access token.
-- **Body:** none.
-
-### 10) `POST /api/v4/google/sync`
-- **Use:** Sync multiple resources in one call.
-- **Body params:**
-  - `access_token` (string, optional override)
-  - `sync` (array optional: `calendar`, `youtube`, `drive`)
-  - `calendar.max_results` (int optional)
-  - `youtube.max_results` (int optional)
-  - `drive.page_size` (int optional)
-  - `drive.order_by` (string optional)
-  - `drive.page_token` (string optional)
-  - `drive.query` (string optional)
+### `GET /api/v4/google/oauth/callback`
+- Auth: no
+- Query fields from Google:
+  - `code` (string, optional when success)
+  - `state` (string, optional when success)
+  - `scope` (string, optional)
+  - `error` (string, optional on failure)
+  - `error_description` (string, optional on failure)
+- Body fields: none
+- Success response data:
+  - `code`
+  - `state`
+  - `scope`
+  - `hint`
 
 ---
 
-## Calendar routes
+## Protected endpoints
 
-### 11) `POST /api/v4/google/calendar/events`
-- **Use:** List calendar events.
-- **Body params:**
+## OAuth and connection
+
+### `POST /api/v4/google/connect`
+- Query fields: none
+- Body fields:
+  - `refresh_token` (string, required)
   - `access_token` (string, optional)
-  - `calendar.max_results` (int, optional)
+  - `expires_in` (integer, optional)
+  - `google_email` (string/email, optional)
+  - `google_calendar_id` (string, optional)
+- Response data:
+  - `connected` (bool)
+  - `google_email` (string|null)
+  - `google_calendar_id` (string|null)
+  - `token_expires_at` (string|null, ISO8601)
+  - `token_valid` (bool)
 
-### 12) `POST /api/v4/google/calendar/events/create`
-- **Use:** Create event.
-- **Body params:**
+### `GET /api/v4/google/oauth/url`
+- Query fields:
+  - `redirect_uri` (string/url, optional override)
+- Body fields: none
+- Response data:
+  - `oauth_url` (string)
+  - `state` (string)
+  - `redirect_uri` (string)
+  - `scopes` (array of string)
+
+### `POST /api/v4/google/oauth/exchange-code`
+- Query fields: none
+- Body fields:
+  - `code` (string, required)
+  - `state` (string, required in current flow)
+  - `redirect_uri` (string/url, optional override)
+- Response data:
+  - `access_token` (string)
+  - `refresh_token_received` (bool)
+  - `expires_in` (integer)
+  - `status` (object, same shape as `connect` status)
+
+### `DELETE /api/v4/google/disconnect`
+- Query fields: none
+- Body fields: none
+- Response data: same shape as status object
+
+### `GET /api/v4/google/status`
+- Query fields: none
+- Body fields: none
+- Response data:
+  - status object (`connected`, `google_email`, `google_calendar_id`, `token_expires_at`, `token_valid`)
+  - `urls` object:
+    - `webhook_url`
+    - `return_url`
+    - `oauth_exchange_endpoint`
+    - `oauth_url_endpoint`
+    - `oauth_callback_endpoint`
+    - `webhook_endpoint`
+  - `watch_channels` array with items:
+    - `id`
+    - `resource_type`
+    - `channel_id`
+    - `status`
+    - `expires_at`
+    - `last_notification_at`
+    - `last_message_number`
+
+### `GET /api/v4/google/urls`
+- Query fields: none
+- Body fields: none
+- Response data:
+  - `webhook_url`
+  - `return_url`
+  - `oauth_exchange_endpoint`
+  - `oauth_url_endpoint`
+  - `oauth_callback_endpoint`
+  - `webhook_endpoint`
+
+### `POST /api/v4/google/token/refresh`
+- Query fields: none
+- Body fields: none
+- Response data:
+  - `access_token`
+  - `status` (status object)
+
+---
+
+## Watch endpoints
+
+### `POST /api/v4/google/watch`
+- Query fields: none
+- Body fields:
+  - `resource_type` (`calendar` | `drive`, required)
+  - `ttl_seconds` (integer, optional)
+  - `access_token` (string, optional override)
+- Response data:
+  - `channel` object (DB record fields)
+
+### `DELETE /api/v4/google/watch/{channelId}`
+- Path fields:
+  - `channelId` (string, required)
+- Query fields: none
+- Body fields: none
+- Response data: none
+
+---
+
+## Combined sync
+
+### `POST /api/v4/google/sync`
+- Query fields: none
+- Body fields:
+  - `access_token` (string, optional override)
+  - `sync` (array, optional: `calendar`, `youtube`, `drive`)
+  - `calendar.max_results` (integer, optional)
+  - `youtube.max_results` (integer, optional)
+  - `drive.page_size` (integer, optional)
+  - `drive.order_by` (string, optional)
+  - `drive.page_token` (string, optional)
+  - `drive.query` (string, optional)
+- Response data:
+  - `calendar` (object, when requested)
+  - `youtube` (object, when requested)
+  - `drive` (object, when requested)
+
+---
+
+## Calendar endpoints
+
+### `POST /api/v4/google/calendar/events`
+- Query fields: none
+- Body fields:
+  - `access_token` (string, optional)
+  - `calendar.max_results` (integer, optional)
+- Response data: Google Calendar list response payload
+
+### `POST /api/v4/google/calendar/events/create`
+- Query fields: none
+- Body fields:
   - `summary` (string, required)
   - `description` (string, optional)
   - `location` (string, optional)
   - `start` (datetime string, required)
   - `end` (datetime string, required)
   - `timezone` (string, optional)
-  - `attendees` (array optional)
-  - `with_google_meet` (bool optional)
-  - `reminders.use_default` (bool optional)
-  - `reminders.overrides` (array optional)
+  - `attendees` (array, optional)
+    - `attendees[].email` (email, required when attendees provided)
+    - `attendees[].display_name` (string, optional)
+    - `attendees[].optional` (bool, optional)
+  - `with_google_meet` (bool, optional)
+  - `reminders.use_default` (bool, optional)
+  - `reminders.overrides` (array, optional)
+  - `access_token` (string, optional)
+- Response data: created Google event payload
 
-### 13) `GET /api/v4/google/calendar/events/{eventId}`
-- **Use:** Get single event details.
-- **Path params:** `eventId` (string, required)
+### `GET /api/v4/google/calendar/events/{eventId}`
+- Path fields:
+  - `eventId` (string, required)
+- Query fields: none
+- Body fields: none
+- Response data: Google event payload
 
-### 14) `PUT /api/v4/google/calendar/events/{eventId}`
-- **Use:** Update event.
-- **Path params:** `eventId` (string, required)
-- **Body params:** same as create.
+### `PUT /api/v4/google/calendar/events/{eventId}`
+- Path fields:
+  - `eventId` (string, required)
+- Query fields: none
+- Body fields: same as create event
+- Response data: updated Google event payload
 
-### 15) `DELETE /api/v4/google/calendar/events/{eventId}`
-- **Use:** Delete event.
-- **Path params:** `eventId` (string, required)
+### `DELETE /api/v4/google/calendar/events/{eventId}`
+- Path fields:
+  - `eventId` (string, required)
+- Query fields: none
+- Body fields: none
+- Response data: none
 
 ---
 
-## YouTube route
+## YouTube endpoint
 
-### 16) `POST /api/v4/google/youtube/channels`
-- **Use:** Fetch linked user channels.
-- **Body params:**
+### `POST /api/v4/google/youtube/channels`
+- Query fields: none
+- Body fields:
   - `access_token` (string, optional)
-  - `youtube.max_results` (int, optional)
+  - `youtube.max_results` (integer, optional)
+- Response data: Google YouTube channels payload
 
 ---
 
-## Drive routes
+## Drive endpoints
 
-### 17) `POST /api/v4/google/drive/files`
-- **Use:** List drive files.
-- **Body params:**
+### `POST /api/v4/google/drive/files`
+- Query fields: none
+- Body fields:
   - `access_token` (string, optional)
-  - `drive.page_size` (int, optional)
+  - `drive.page_size` (integer, optional)
   - `drive.order_by` (string, optional)
+- Response data: Google Drive files payload
 
-### 18) `POST /api/v4/google/drive/files/search`
-- **Use:** Search files with query and pagination.
-- **Body params:**
+### `POST /api/v4/google/drive/files/search`
+- Query fields: none
+- Body fields:
   - `access_token` (string, optional)
   - `drive.query` (string, optional)
-  - `drive.page_size` (int, optional)
+  - `drive.page_size` (integer, optional)
   - `drive.page_token` (string, optional)
   - `drive.order_by` (string, optional)
+- Response data: Google Drive search payload
 
-### 19) `POST /api/v4/google/drive/files/upload`
-- **Use:** Upload a file to drive.
-- **Content-Type:** `multipart/form-data`
-- **Form params:**
+### `POST /api/v4/google/drive/files/upload`
+- Query fields: none
+- Body fields (`multipart/form-data`):
   - `file` (file, required)
   - `name` (string, optional)
   - `parent_id` (string, optional)
   - `mime_type` (string, optional)
+  - `access_token` (string, optional)
+- Response data: uploaded file payload
 
-### 20) `POST /api/v4/google/drive/folders/create`
-- **Use:** Create folder.
-- **Body params:**
+### `POST /api/v4/google/drive/folders/create`
+- Query fields: none
+- Body fields:
   - `name` (string, required)
   - `parent_id` (string, optional)
+  - `access_token` (string, optional)
+- Response data: created folder payload
 
-### 21) `PATCH /api/v4/google/drive/files/{fileId}/move`
-- **Use:** Move file/folder to another parent.
-- **Path params:** `fileId` (string, required)
-- **Body params:**
+### `PATCH /api/v4/google/drive/files/{fileId}/move`
+- Path fields:
+  - `fileId` (string, required)
+- Query fields: none
+- Body fields:
   - `new_parent_id` (string, required)
   - `remove_parent_id` (string, optional)
   - `access_token` (string, optional)
+- Response data: moved file payload
 
-### 22) `POST /api/v4/google/drive/files/{fileId}/share`
-- **Use:** Share file/folder.
-- **Path params:** `fileId` (string, required)
-- **Body params:**
-  - `email` (string/email, required)
+### `POST /api/v4/google/drive/files/{fileId}/share`
+- Path fields:
+  - `fileId` (string, required)
+- Query fields: none
+- Body fields:
+  - `email` (email, required)
   - `role` (`reader|commenter|writer`, required)
   - `type` (`user|group|domain|anyone`, optional)
   - `send_notification_email` (bool, optional)
+  - `access_token` (string, optional)
+- Response data: permission/share payload
 
-### 23) `PATCH /api/v4/google/drive/files/{fileId}/rename`
-- **Use:** Rename file/folder.
-- **Path params:** `fileId` (string, required)
-- **Body params:**
+### `PATCH /api/v4/google/drive/files/{fileId}/rename`
+- Path fields:
+  - `fileId` (string, required)
+- Query fields: none
+- Body fields:
   - `name` (string, required)
   - `access_token` (string, optional)
+- Response data: renamed file payload
 
-### 24) `DELETE /api/v4/google/drive/files/{fileId}`
-- **Use:** Delete file/folder.
-- **Path params:** `fileId` (string, required)
-
----
-
-## Flutter call examples
-
-JSON POST:
-
-```dart
-final res = await dio.post('/sync', data: {
-  'sync': ['calendar', 'drive'],
-  'calendar': {'max_results': 20},
-  'drive': {'page_size': 50}
-});
-final data = res.data['data'];
-```
-
-Path param:
-
-```dart
-await dio.delete('/calendar/events/$eventId');
-```
-
-Multipart upload:
-
-```dart
-final fileName = file.path.split('/').last;
-final form = FormData.fromMap({
-  'file': await MultipartFile.fromFile(file.path, filename: fileName),
-  'name': fileName,
-});
-final res = await dio.post('/drive/files/upload', data: form);
-```
-
-Common error handling:
-
-```dart
-try {
-  final res = await dio.get('/status');
-} on DioException catch (e) {
-  final msg = e.response?.data?['message'] ?? 'Something went wrong';
-  // show snackbar/toast
-}
-```
+### `DELETE /api/v4/google/drive/files/{fileId}`
+- Path fields:
+  - `fileId` (string, required)
+- Query fields: none
+- Body fields: none
+- Response data: none
 
 ---
 
-## Required env for this module
+## Env configuration (current)
 
-- `GOOGLE_OAUTH_CLIENT_JSON`
-  - Example: `storage/keys/suganta-sync.json`
-  - JSON values are used first for `client_id`, `client_secret`, and `redirect_uri`.
-- `GOOGLE_CLIENT_ID` (optional fallback if JSON missing)
-- `GOOGLE_CLIENT_SECRET` (optional fallback if JSON missing)
-- `GOOGLE_OAUTH_TOKEN_URL`
+- `GOOGLE_OAUTH_CLIENT_JSON` (recommended, e.g. `storage/keys/suganta-sync.json`)
+- `GOOGLE_CLIENT_ID` (optional fallback)
+- `GOOGLE_CLIENT_SECRET` (optional fallback)
 - `GOOGLE_OAUTH_AUTHORIZE_URL`
+- `GOOGLE_OAUTH_TOKEN_URL`
 - `GOOGLE_REDIRECT_URI`
-  - Recommended: `https://your-domain.com/api/v4/google/oauth/callback`
 - `GOOGLE_OAUTH_STATE_TTL_SECONDS`
 - `GOOGLE_DEFAULT_SCOPES`
 - `GOOGLE_WEBHOOK_URL`

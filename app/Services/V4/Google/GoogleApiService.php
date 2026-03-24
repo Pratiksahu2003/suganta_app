@@ -333,11 +333,22 @@ class GoogleApiService
             $response->throw();
         } catch (RequestException $exception) {
             $body = $response->json();
-            $message = is_array($body)
-                ? (string) data_get($body, 'error.message', 'Google API request failed.')
-                : 'Google API request failed.';
+            $status = $response->status() ?: 400;
+            $message = 'Google API request failed.';
 
-            throw new \RuntimeException($message, $response->status(), $exception);
+            if (is_array($body)) {
+                $message = (string) data_get($body, 'error.message')
+                    ?: (string) data_get($body, 'error_description')
+                    ?: (string) data_get($body, 'message')
+                    ?: $message;
+            } else {
+                $rawBody = trim($response->body());
+                if ($rawBody !== '') {
+                    $message = mb_substr($rawBody, 0, 350);
+                }
+            }
+
+            throw new \RuntimeException("Google API error ({$status}): {$message}", $status, $exception);
         }
 
         if ($response->status() === 204) {

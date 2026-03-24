@@ -155,44 +155,67 @@ class GoogleSyncController extends Controller
         $sync = $request->input('sync', ['calendar', 'youtube', 'drive']);
 
         $payload = [];
+        $errors = [];
 
         try {
             $token = $this->googleTokenService->getValidAccessToken(
                 $user,
                 $request->input('access_token')
             );
-
-            if (in_array('calendar', $sync, true)) {
-                $payload['calendar'] = $this->googleSyncService->syncCalendar(
-                    (int) $user->id,
-                    $token,
-                    (int) $request->input('calendar.max_results', 20)
-                );
-            }
-
-            if (in_array('youtube', $sync, true)) {
-                $payload['youtube'] = $this->googleSyncService->syncYoutube(
-                    (int) $user->id,
-                    $token,
-                    (int) $request->input('youtube.max_results', 10)
-                );
-            }
-
-            if (in_array('drive', $sync, true)) {
-                $payload['drive'] = $this->googleSyncService->syncDrive(
-                    (int) $user->id,
-                    $token,
-                    (int) $request->input('drive.page_size', 50),
-                    $request->input('drive.order_by')
-                );
-            }
         } catch (RuntimeException $exception) {
             return $this->error($exception->getMessage(), $exception->getCode() ?: 400);
         } catch (Throwable $exception) {
             return $this->serverError('Google sync failed.', $exception->getMessage());
         }
 
-        return $this->success('Google resources synced successfully.', $payload);
+        if (in_array('calendar', $sync, true)) {
+            try {
+                $payload['calendar'] = $this->googleSyncService->syncCalendar(
+                    (int) $user->id,
+                    $token,
+                    (int) $request->input('calendar.max_results', 20)
+                );
+            } catch (Throwable $exception) {
+                $errors['calendar'] = $exception->getMessage();
+            }
+        }
+
+        if (in_array('youtube', $sync, true)) {
+            try {
+                $payload['youtube'] = $this->googleSyncService->syncYoutube(
+                    (int) $user->id,
+                    $token,
+                    (int) $request->input('youtube.max_results', 10)
+                );
+            } catch (Throwable $exception) {
+                $errors['youtube'] = $exception->getMessage();
+            }
+        }
+
+        if (in_array('drive', $sync, true)) {
+            try {
+                $payload['drive'] = $this->googleSyncService->syncDrive(
+                    (int) $user->id,
+                    $token,
+                    (int) $request->input('drive.page_size', 50),
+                    $request->input('drive.order_by')
+                );
+            } catch (Throwable $exception) {
+                $errors['drive'] = $exception->getMessage();
+            }
+        }
+
+        if ($payload === []) {
+            return $this->error('Google sync failed for all requested services.', 400, $errors);
+        }
+
+        return $this->success(
+            $errors === [] ? 'Google resources synced successfully.' : 'Google sync partially completed.',
+            [
+                'resources' => $payload,
+                'errors' => $errors,
+            ]
+        );
     }
 
     public function calendarEvents(SyncGoogleRequest $request): JsonResponse
