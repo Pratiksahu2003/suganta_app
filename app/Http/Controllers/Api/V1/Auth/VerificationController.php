@@ -8,16 +8,18 @@ use App\Traits\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use App\Services\AuthService;
 
 class VerificationController extends Controller
 {
     use ApiResponse;
 
     protected $otpService;
-
-    public function __construct(OtpService $otpService)
+    protected AuthService $authService;
+    public function __construct(OtpService $otpService , AuthService $authService)
     {
         $this->otpService = $otpService;
+        $this->authService = $authService;
     }
 
     /**
@@ -66,6 +68,7 @@ class VerificationController extends Controller
         if ($request->filled('email_otp')) {
             if ($this->otpService->verifyOtp($user, $request->email_otp, 'email')) {
                 $messages[] = 'Email verified successfully.';
+                $this->authService->logout($request->user());
             } else {
                 $messages[] = 'Invalid or expired Email OTP.';
                 $hasError = true;
@@ -76,6 +79,7 @@ class VerificationController extends Controller
         if ($request->filled('phone_otp')) {
             if ($this->otpService->verifyOtp($user, $request->phone_otp, 'phone')) {
                 $messages[] = 'Phone verified successfully.';
+                $this->authService->logout($request->user());
             } else {
                 $messages[] = 'Invalid or expired Phone OTP.';
                 $hasError = true;
@@ -83,15 +87,14 @@ class VerificationController extends Controller
         }
 
         $message = implode(' ', $messages);
-        $userData = $user->fresh()->only(['id','role','email', 'phone', 'email_verified_at', 'registration_fee_status', 'verification_status']);
+        $userData = $user->fresh()->only(['id', 'role', 'email', 'phone', 'email_verified_at', 'registration_fee_status', 'verification_status']);
         $userData['payment_required'] = $user->role != 'student' ? true : false;
         if ($hasError) {
-             // In case of error, we might still want to return user data for context?
-             // But error() puts data into 'errors'. 
-             // Ideally we just return error message.
-             return $this->error($message, 400, ['user' => $userData]);
+            // In case of error, we might still want to return user data for context?
+            // But error() puts data into 'errors'. 
+            // Ideally we just return error message.
+            return $this->error($message, 400, ['user' => $userData]);
         }
-
         return $this->success($message, ['user' => $userData]);
     }
 }
