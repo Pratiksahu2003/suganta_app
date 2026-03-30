@@ -15,10 +15,10 @@ class MetaGraphApiService
 
     public function __construct()
     {
-        $this->apiVersion     = config('chatbot.meta_api_version', 'v19.0');
-        $this->messengerToken = config('chatbot.meta_page_token', '');
-        $this->instagramToken = config('chatbot.meta_ig_page_token') ?: $this->messengerToken;
-        $this->appSecret      = config('chatbot.meta_app_secret', '');
+        $this->apiVersion     = (string) config('chatbot.meta_api_version', 'v19.0');
+        $this->messengerToken = (string) config('chatbot.meta_page_token', '');
+        $this->instagramToken = (string) config('chatbot.meta_ig_page_token') ?: $this->messengerToken;
+        $this->appSecret      = (string) config('chatbot.meta_app_secret', '');
     }
 
     /* ──────────────────────────────────────────────
