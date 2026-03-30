@@ -1,0 +1,17 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls",
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "suganta.international",
+      "sha256_cert_fingerprints": [
+        "32:88:01:A8:22:58:A7:51:0F:54:50:B6:80:43:E3:ED:71:77:EF:A8:34:0C:9A:20:61:67:8C:96:CE:7E:93:E5",
+        "0E:17:9F:C0:AA:10:FE:B0:72:06:6C:52:17:2A:7B:4C:3D:9D:DF:B6:A6:AA:78:88:32:91:63:3F:E5:E1:F6:D2",
+        "9F:75:EF:E7:0A:99:8F:3A:29:AE:5F:A0:66:B1:D7:0C:E4:4B:E6:82:D4:7A:F3:30:05:E3:F1:C4:74:F0:5C:B5"
+      ]
+    }
+  }
+]

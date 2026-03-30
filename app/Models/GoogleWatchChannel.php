@@ -7,6 +7,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class GoogleWatchChannel extends Model
 {
+
+    protected $connection = 'ai_mysql';
+
+    protected $table = 'google_watch_channels';
+
     protected $fillable = [
         'user_id',
         'resource_type',
