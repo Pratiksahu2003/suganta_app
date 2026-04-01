@@ -35,4 +35,16 @@ Route::get('/api/v1', function () {
     return  redirect('https://www.suganta.com');
 });
 
+Route::get('/api/v2', function () {
+    return  redirect('https://www.suganta.com');
+});
+Route::get('/api/v2', function () {
+    return  redirect('https://www.suganta.com');
+});
+Route::get('/api/v4', function () {
+    return  redirect('https://www.suganta.com');
+});
+Route::get('/api/v5', function () {
+    return  redirect('https://www.suganta.com');
+});
 
