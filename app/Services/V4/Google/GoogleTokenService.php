@@ -4,7 +4,6 @@ namespace App\Services\V4\Google;
 
 use App\Models\User;
 use Carbon\CarbonImmutable;
-use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
@@ -68,7 +67,7 @@ class GoogleTokenService
             return $this->normalizeToken($fallbackAccessToken);
         }
 
-        $storedAccessToken = $this->safeDecryptAttribute($user, 'google_access_token');
+        $storedAccessToken = $user->google_access_token;
         $expiresAt = $user->google_token_expires_at;
 
         if ($storedAccessToken && $expiresAt && $expiresAt->gt(now()->addMinutes(2))) {
@@ -80,8 +79,7 @@ class GoogleTokenService
 
     public function refreshAccessToken(User $user): string
     {
-        $refreshToken = $this->safeDecryptAttribute($user, 'google_refresh_token');
-        if (! $refreshToken) {
+        if (! $user->google_refresh_token) {
             throw new RuntimeException('Google account is not connected. Please connect with refresh token first.', 422);
         }
 
@@ -101,7 +99,7 @@ class GoogleTokenService
             ->post($tokenUrl, [
                 'client_id' => $clientId,
                 'client_secret' => $clientSecret,
-                'refresh_token' => $refreshToken,
+                'refresh_token' => $user->google_refresh_token,
                 'grant_type' => 'refresh_token',
             ]);
 
@@ -242,7 +240,7 @@ class GoogleTokenService
     public function status(User $user): array
     {
         return [
-            'connected' => ! empty($this->safeDecryptAttribute($user, 'google_refresh_token')),
+            'connected' => ! empty($user->google_refresh_token),
             'google_email' => $user->google_email,
             'google_calendar_id' => $user->google_calendar_id,
             'token_expires_at' => optional($user->google_token_expires_at)?->toISOString(),
@@ -357,23 +355,5 @@ class GoogleTokenService
         }
 
         return (string) preg_replace('/[\x00-\x1F\x7F]/u', '', $value);
-    }
-
-    /**
-     * Safely decrypt a model attribute, returning null if decryption fails (e.g. invalid APP_KEY).
-     */
-    private function safeDecryptAttribute(User $user, string $attribute): ?string
-    {
-        try {
-            return $user->{$attribute};
-        } catch (DecryptException $e) {
-            Log::warning("Google token decryption failed for user {$user->id} attribute {$attribute}. Data might be corrupted or APP_KEY changed.", [
-                'user_id' => $user->id,
-                'attribute' => $attribute,
-                'error' => $e->getMessage(),
-            ]);
-
-            return null;
-        }
     }
 }

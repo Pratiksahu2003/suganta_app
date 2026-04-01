@@ -82,8 +82,6 @@ class User extends Authenticatable implements MustVerifyEmail, CanResetPassword
             'registration_fee_status' => 'string',
             'latitude' => 'decimal:8',
             'longitude' => 'decimal:8',
-            'google_access_token' => 'encrypted',
-            'google_refresh_token' => 'encrypted',
             'google_token_expires_at' => 'datetime',
         ];
     }
