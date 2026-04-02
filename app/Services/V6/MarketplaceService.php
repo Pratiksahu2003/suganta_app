@@ -316,11 +316,6 @@ class MarketplaceService
             $freshOrder = $this->cashfree->getOrder($payment->order_id);
             $orderStatus = strtoupper($freshOrder['order_status'] ?? '');
 
-            if ($this->cashfree->isOrderPaid($freshOrder)) {
-                $this->processSuccessfulPayment($payment, $freshOrder);
-                return ['already_paid' => true];
-            }
-
             if (in_array($orderStatus, ['ACTIVE'], true)) {
                 $payment->update(['gateway_response' => $freshOrder]);
                 $checkoutUrl = $this->cashfree->getCheckoutUrl($freshOrder);
