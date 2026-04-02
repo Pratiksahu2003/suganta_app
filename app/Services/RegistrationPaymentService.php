@@ -158,7 +158,8 @@ class RegistrationPaymentService
                 $user->email,
                 $user->phone ?? '9999999999',
                 (float) $amount,
-                $roleCharges['currency'] ?? 'INR'
+                $roleCharges['currency'] ?? 'INR',
+                $user->name ?? ''
             );
 
             $orderResponse = $this->cashfree->createOrder($orderPayload);

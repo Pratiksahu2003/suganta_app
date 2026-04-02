@@ -122,7 +122,8 @@ class NotePurchaseService
                 $user->email,
                 $user->phone ?? '9999999999',
                 $amount,
-                $currency
+                $currency,
+                $user->name ?? ''
             );
 
             $orderResponse = $this->cashfree->createOrder($orderPayload);

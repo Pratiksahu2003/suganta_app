@@ -27,18 +27,26 @@ class CashfreeService
 
     /**
      * Build the order payload for Cashfree order creation.
+     * Sanitizes and validates the customer phone number and name against 
+     * global standards to ensure API acceptance and payment resilience.
      *
-     * URL construction deliberately extracts only the scheme+host from APP_URL
-     * so that it stays correct even when APP_URL already contains a path suffix
-     * like "/api/v1" (which would otherwise produce doubled segments).
+     * @param string $orderId
+     * @param string $customerId
+     * @param string $customerEmail
+     * @param string $customerPhone
+     * @param float  $orderAmount
+     * @param string $orderCurrency
+     * @param string $customerName (Optional)
+     * @return array
      */
     public function buildOrderPayload(
         string $orderId,
         string $customerId,
         string $customerEmail,
         string $customerPhone,
-        float $orderAmount,
-        string $orderCurrency
+        float  $orderAmount,
+        string $orderCurrency,
+        string $customerName = ''
     ): array {
         $baseUrl = $this->deriveBaseUrl();
 
@@ -47,6 +55,23 @@ class CashfreeService
             ? rtrim($configReturnUrl, '/') . '?order_id=' . $orderId
             : $baseUrl . '/api/v1/payment/callback?order_id=' . $orderId;
 
+        // Sanitize and validate customer phone to meet global standards (E.164)
+        $sanitizedPhone = $this->sanitizePhoneNumber($customerPhone);
+        
+        // Resilience Logic: If the phone is invalid, fallback to a dummy number
+        // instead of crashing to ensure the payment flow continues.
+        if (!$this->isValidE164($sanitizedPhone)) {
+            $this->logError('Invalid customer phone encountered, falling back to dummy', [
+                'order_id'       => $orderId,
+                'original_phone' => $customerPhone,
+                'sanitized'      => $sanitizedPhone,
+            ]);
+            $sanitizedPhone = '9999999999';
+        }
+
+        // Sanitize customer name
+        $sanitizedName = $this->sanitizeName($customerName ?: $customerId);
+
         return [
             'order_id'         => $orderId,
             'order_amount'     => $orderAmount,
@@ -54,7 +79,8 @@ class CashfreeService
             'customer_details' => [
                 'customer_id'    => $customerId,
                 'customer_email' => $customerEmail,
-                'customer_phone' => $customerPhone,
+                'customer_phone' => $sanitizedPhone,
+                'customer_name'  => $sanitizedName,
             ],
             'order_meta' => [
                 'return_url' => $returnUrl,
@@ -280,6 +306,64 @@ class CashfreeService
         }
 
         return 'https://sandbox.cashfree.com/order/#/' . $paymentSessionId;
+    }
+
+    /**
+     * Sanitize a phone number by removing spaces and non-numeric characters
+     * while preserving a leading '+' if present.
+     *
+     * @param string $phone
+     * @return string
+     */
+    private function sanitizePhoneNumber(string $phone): string
+    {
+        $phone = trim($phone);
+        
+        if ($phone === '') {
+            return '';
+        }
+
+        $startsWithPlus = str_starts_with($phone, '+');
+        
+        // Remove everything except digits
+        $digits = preg_replace('/[^0-9]/', '', $phone);
+        
+        return ($startsWithPlus ? '+' : '') . $digits;
+    }
+
+    /**
+     * Validate if the phone number meets global E.164 standard rules.
+     * Checks if the number has between 7 and 15 digits.
+     *
+     * @param string $sanitizedPhone
+     * @return bool
+     */
+    private function isValidE164(string $sanitizedPhone): bool
+    {
+        if ($sanitizedPhone === '') {
+            return false;
+        }
+
+        // Standard E.164 phone numbers must be between 7 and 15 digits
+        $digits = preg_replace('/[^0-9]/', '', $sanitizedPhone);
+        $len    = strlen($digits);
+
+        return $len >= 7 && $len <= 15;
+    }
+
+    /**
+     * Sanitize a customer name for the payment gateway.
+     *
+     * @param string $name
+     * @return string
+     */
+    private function sanitizeName(string $name): string
+    {
+        // Limit to 200 chars as per Cashfree spec, remove non-alphanumeric except spaces/dots/dashes
+        $name = trim($name);
+        $name = preg_replace('/[^A-Za-z0-9 .-]/', '', $name);
+        
+        return substr($name ?: 'Customer', 0, 200);
     }
 
     private function getHeaders(): array

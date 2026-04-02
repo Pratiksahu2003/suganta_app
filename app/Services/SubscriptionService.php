@@ -128,7 +128,8 @@ class SubscriptionService
                 $user->email,
                 $user->phone ?? '9999999999',
                 (float) $amount,
-                $plan->currency
+                $plan->currency,
+                $user->name ?? ''
             );
 
             $orderResponse = $this->cashfree->createOrder($orderPayload);
