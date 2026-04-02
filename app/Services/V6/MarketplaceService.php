@@ -31,7 +31,10 @@ class MarketplaceService
         $cacheKey = 'marketplace:listings:' . md5(serialize($filters));
 
         return Cache::tags([self::CACHE_TAG])->remember($cacheKey, 3600, function () use ($filters) {
-            $query = MarketplaceListing::active()->with('user:id,name,profile_image');
+            $query = MarketplaceListing::active()->with([
+                'user:id,name',
+                'user.profile:id,user_id,profile_image'
+            ]);
 
             if (!empty($filters['exclude_user_id'])) {
                 $query->where('user_id', '!=', $filters['exclude_user_id']);
@@ -65,7 +68,7 @@ class MarketplaceService
         }
 
         $maxListings = $subscription->plan->max_listings ?? 0;
-        
+
         // 2. Redis-based fast limit check
         $countKey = str_replace('{id}', $user->id, self::USER_COUNT_KEY);
         $currentCount = Redis::get($countKey);
@@ -96,7 +99,7 @@ class MarketplaceService
     {
         // Increment global trending score
         Redis::zincrby(self::TRENDING_KEY, 1, $listingId);
-        
+
         // Update DB periodically (optional sync)
         MarketplaceListing::where('id', $listingId)->increment('views_count');
     }
@@ -107,13 +110,17 @@ class MarketplaceService
     public function getTrending(int $limit = 10)
     {
         $ids = Redis::zrevrange(self::TRENDING_KEY, 0, $limit - 1);
-        
+
         if (empty($ids)) {
             return collect();
         }
 
         return MarketplaceListing::whereIn('id', $ids)
             ->active()
+            ->with([
+                'user:id,name',
+                'user.profile:id,user_id,profile_image'
+            ])
             ->orderByRaw('FIELD(id, ' . implode(',', $ids) . ')')
             ->get();
     }
@@ -125,9 +132,9 @@ class MarketplaceService
     {
         $token = Str::random(40);
         $key = 'marketplace:download:' . $token;
-        
+
         Redis::setex($key, 300, $orderId); // 5 minute TTL
-        
+
         return $token;
     }
 
@@ -138,7 +145,7 @@ class MarketplaceService
     {
         $key = 'marketplace:download:' . $token;
         $orderId = Redis::get($key);
-        
+
         if (!$orderId) {
             return null;
         }
@@ -152,7 +159,7 @@ class MarketplaceService
     public function initiateChat(User $buyer, MarketplaceListing $listing)
     {
         $seller = $listing->user;
-        
+
         return DB::connection('ai_mysql')->transaction(function () use ($buyer, $seller, $listing) {
             // 1. Check for existing private conversation
             $conversationId = ChatConversation::query()
@@ -226,16 +233,16 @@ class MarketplaceService
         // Build Cashfree payload
         $payload = $cashfree->buildOrderPayload(
             $orderId,
-            (string)$buyer->id,
+            (string) $buyer->id,
             $buyer->email ?? '',
             $buyer->phone ?? '',
-            (float)$listing->price,
+            (float) $listing->price,
             'INR',
             $buyer->name
         );
 
         $response = $cashfree->createOrder($payload);
-        
+
         return $cashfree->getCheckoutUrl($response);
     }
 
@@ -245,14 +252,16 @@ class MarketplaceService
     public function processSuccessfulPayment(Payment $payment, array $paymentData)
     {
         $listingId = $payment->meta['listing_id'] ?? null;
-        if (!$listingId) return;
+        if (!$listingId)
+            return;
 
         $listing = MarketplaceListing::with('user')->find($listingId);
-        if (!$listing) return;
+        if (!$listing)
+            return;
 
         DB::transaction(function () use ($payment, $listing) {
             // 1. Calculate amounts (Commission & Seller Payout)
-            $totalAmount = (float)$payment->amount;
+            $totalAmount = (float) $payment->amount;
             $commissionAmount = ($totalAmount * self::COMMISSION_PERCENT) / 100;
             $sellerAmount = $totalAmount - $commissionAmount;
 

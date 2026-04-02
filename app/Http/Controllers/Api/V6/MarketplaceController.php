@@ -33,8 +33,9 @@ class MarketplaceController extends Controller
     {
         $filters = $request->only(['category', 'type', 'search']);
         $filters['exclude_user_id'] = auth()->id();
-        
+
         $listings = $this->service->getListings($filters);
+        $listings->getCollection()->transform(fn($listing) => $this->formatListing($listing));
         return $this->success('Listings retrieved successfully', $listings);
     }
 
@@ -43,9 +44,13 @@ class MarketplaceController extends Controller
      */
     public function show($id)
     {
-        $listing = MarketplaceListing::active()->with('user:id,name,profile_image')->findOrFail($id);
+        $listing = MarketplaceListing::active()->with([
+            'user:id,name',
+            'user.profile:id,user_id,profile_image'
+        ])->findOrFail($id);
+
         $this->service->recordView($listing->id);
-        return $this->success('Listing details retrieved', $listing);
+        return $this->success('Listing details retrieved', $this->formatListing($listing));
     }
 
     /**
@@ -53,7 +58,9 @@ class MarketplaceController extends Controller
      */
     public function trending()
     {
-        return $this->success('Trending listings retrieved', $this->service->getTrending(10));
+        $listings = $this->service->getTrending(10);
+        $formatted = $listings->map(fn($listing) => $this->formatListing($listing));
+        return $this->success('Trending listings retrieved', $formatted);
     }
 
     /**
@@ -75,7 +82,7 @@ class MarketplaceController extends Controller
     public function purchase($id)
     {
         $listing = MarketplaceListing::active()->where('type', 'soft')->findOrFail($id);
-        
+
         try {
             $checkoutUrl = $this->service->initiatePayment(auth()->user(), $listing);
             return $this->success('Checkout URL generated', ['checkout_url' => $checkoutUrl]);
@@ -90,7 +97,7 @@ class MarketplaceController extends Controller
     public function contactSeller($id)
     {
         $listing = MarketplaceListing::active()->where('type', 'hard')->findOrFail($id);
-        
+
         try {
             $conversationId = $this->service->initiateChat(auth()->user(), $listing);
             return $this->success('Conversation initiated', ['conversation_id' => $conversationId]);
@@ -123,23 +130,23 @@ class MarketplaceController extends Controller
     /**
      * List my own listings
      */
- public function myListings()
-{
-    $listings = auth()->user()
-        ->marketplaceListings()
-        ->with([
-            'user:id,name',
-            'user.profile:id,user_id,profile_image'
-        ])
-        ->latest()
-        ->paginate(15);
+    public function myListings()
+    {
+        $listings = auth()->user()
+            ->marketplaceListings()
+            ->with([
+                'user:id,name',
+                'user.profile:id,user_id,profile_image'
+            ])
+            ->latest()
+            ->paginate(15);
 
-    $listings->getCollection()->transform(function ($listing) {
-        return $this->formatListing($listing);
-    });
+        $listings->getCollection()->transform(function ($listing) {
+            return $this->formatListing($listing);
+        });
 
-    return $this->paginated($listings, 'My listings retrieved');
-}
+        return $this->paginated($listings, 'My listings retrieved');
+    }
 
     /**
      * Create new listing
@@ -187,7 +194,8 @@ class MarketplaceController extends Controller
             }
 
             $listing = $this->service->createListing(auth()->user(), $validated);
-            return $this->created($listing, 'Listing created successfully');
+            $listing->load(['user:id,name', 'user.profile:id,user_id,profile_image']);
+            return $this->created($this->formatListing($listing), 'Listing created successfully');
         } catch (\Exception $e) {
             return $this->error($e->getMessage());
         }
@@ -199,7 +207,7 @@ class MarketplaceController extends Controller
     public function update(Request $request, $id)
     {
         $listing = auth()->user()->marketplaceListings()->findOrFail($id);
-        
+
         $validated = $request->validate([
             'title' => 'sometimes|string|max:255',
             'description' => 'sometimes|string',
@@ -249,7 +257,8 @@ class MarketplaceController extends Controller
         }
 
         $listing->update($validated);
-        return $this->success('Listing updated successfully', $listing);
+        $listing->load(['user:id,name', 'user.profile:id,user_id,profile_image']);
+        return $this->success('Listing updated successfully', $this->formatListing($listing));
     }
 
     /**
@@ -258,7 +267,7 @@ class MarketplaceController extends Controller
     public function destroy($id)
     {
         $listing = auth()->user()->marketplaceListings()->findOrFail($id);
-        
+
         if ($listing->file_path) {
             $this->deleteFile($listing->file_path);
         }
@@ -270,44 +279,44 @@ class MarketplaceController extends Controller
         if (!empty($listing->images)) {
             $this->deleteMultipleFiles($listing->images);
         }
-        
+
         $listing->delete();
         return $this->success('Listing removed');
     }
 
     private function formatListing($listing)
-{
-    return [
-        'id' => $listing->id,
-        'user_id' => $listing->user_id,
-        'title' => $listing->title,
-        'description' => $listing->description,
-        'price' => $listing->price,
-        'category' => $listing->category,
-        'type' => $listing->type,
+    {
+        return [
+            'id' => $listing->id,
+            'user_id' => $listing->user_id,
+            'title' => $listing->title,
+            'description' => $listing->description,
+            'price' => $listing->price,
+            'category' => $listing->category,
+            'type' => $listing->type,
 
-        'file_path' => storage_file_url($listing->file_path),
+            'file_path' => storage_file_url($listing->file_path),
 
-        'thumbnail' => storage_file_url($listing->thumbnail),
+            'thumbnail' => storage_file_url($listing->thumbnail),
 
-        'images' => collect($listing->images ?? [])
-            ->map(fn($img) => storage_file_url($img))
-            ->values(),
+            'images' => collect($listing->images ?? [])
+                ->map(fn($img) => storage_file_url($img))
+                ->values(),
 
-        'status' => $listing->status,
-        'views_count' => $listing->views_count,
-        'created_at' => $listing->created_at,
+            'status' => $listing->status,
+            'views_count' => $listing->views_count,
+            'created_at' => $listing->created_at,
 
-        'user' => [
-            'id' => $listing->user->id ?? null,
-            'name' => $listing->user->name ?? null,
+            'user' => [
+                'id' => $listing->user->id ?? null,
+                'name' => $listing->user->name ?? null,
 
-            'profile' => [
-                'image' => storage_file_url(
-                    $listing->user?->profile?->profile_image
-                ) ?? storage_file_url('default/profile.png')
+                'profile' => [
+                    'image' => storage_file_url(
+                        $listing->user?->profile?->profile_image
+                    ) ?? storage_file_url('default/profile.png')
+                ]
             ]
-        ]
-    ];
-}
+        ];
+    }
 }
