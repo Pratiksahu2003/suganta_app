@@ -52,4 +52,17 @@ class MarketplaceListing extends Model
     {
         return $query->where('type', $type);
     }
+
+    /**
+     * Check if a specific user has purchased this listing
+     */
+    public function isPurchasedBy($userId)
+    {
+        if (!$userId) return false;
+        
+        return MarketplaceOrder::where('user_id', $userId)
+            ->where('listing_id', $this->id)
+            ->where('status', 'completed')
+            ->exists();
+    }
 }

@@ -107,6 +107,25 @@ class MarketplaceController extends Controller
     }
 
     /**
+     * My Purchased Listings
+     */
+    public function myPurchases()
+    {
+        $orders = $this->service->getUserPurchases(auth()->user());
+        $orders->getCollection()->transform(function ($order) {
+            return [
+                'order_id' => $order->id,
+                'amount' => $order->amount,
+                'status' => $order->status,
+                'purchased_at' => $order->created_at,
+                'listing' => $this->formatListing($order->listing),
+            ];
+        });
+
+        return $this->success('Purchases retrieved successfully', $orders);
+    }
+
+    /**
      * Secure Download (Redis)
      */
     public function download(Request $request, $id)
@@ -306,6 +325,7 @@ class MarketplaceController extends Controller
             'status' => $listing->status,
             'views_count' => $listing->views_count,
             'created_at' => $listing->created_at,
+            'is_purchased' => auth()->check() ? $listing->isPurchasedBy(auth()->id()) : false,
 
             'user' => [
                 'id' => $listing->user->id ?? null,

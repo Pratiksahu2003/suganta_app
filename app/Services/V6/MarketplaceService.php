@@ -164,6 +164,18 @@ class MarketplaceService
     }
 
     /**
+     * Get user's successful purchases
+     */
+    public function getUserPurchases(User $user)
+    {
+        return MarketplaceOrder::where('user_id', $user->id)
+            ->where('status', 'completed')
+            ->with(['listing', 'listing.user', 'listing.user.profile'])
+            ->orderByDesc('created_at')
+            ->paginate(15);
+    }
+
+    /**
      * Start/Get chat conversation for hard copy listing (ai_mysql)
      */
     public function initiateChat(User $buyer, MarketplaceListing $listing)

@@ -24,8 +24,9 @@ Route::prefix('marketplace')->middleware('auth:sanctum')->group(function () {
     Route::get('listings/{id}/download', [MarketplaceController::class, 'download'])->name('v6.marketplace.download'); // Secure Download
 
     // User Management (Selling)
-    Route::get('my-listings', [MarketplaceController::class, 'myListings']); // Seller Dashboard
-    Route::post('my-listings', [MarketplaceController::class, 'store']); // Create
+    Route::get('my-listings', [MarketplaceController::class, 'myListings'])->name('v6.marketplace.my-listings');
+    Route::get('my-purchases', [MarketplaceController::class, 'myPurchases'])->name('v6.marketplace.my-purchases');
+    Route::post('my-listings', [MarketplaceController::class, 'store'])->name('v6.marketplace.store');
     Route::put('my-listings/{id}', [MarketplaceController::class, 'update']); // Edit
     Route::delete('my-listings/{id}', [MarketplaceController::class, 'destroy']); // Remove
 });
