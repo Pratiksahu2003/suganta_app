@@ -237,10 +237,21 @@ class MarketplaceService
      */
     public function initiatePayment(User $buyer, MarketplaceListing $listing)
     {
-        $cashfree = app(CashfreeService::class);
+        // 1. Check for existing pending payment to avoid redundant API calls
+        $existingPayment = Payment::where('user_id', $buyer->id)
+            ->where('meta->type', 'marketplace')
+            ->where('meta->listing_id', $listing->id)
+            ->whereIn('status', ['created', 'pending'])
+            ->latest()
+            ->first();
+
+        if ($existingPayment) {
+            return $this->buildProxyCheckoutUrl($existingPayment->order_id);
+        }
+
         $orderId = 'MP-' . strtoupper(Str::random(10));
 
-        // Create Payment record
+        // 2. Create Payment record
         $payment = Payment::create([
             'order_id' => $orderId,
             'user_id' => $buyer->id,
@@ -255,7 +266,7 @@ class MarketplaceService
         ]);
 
         // Build Cashfree payload
-        $payload = $cashfree->buildOrderPayload(
+        $payload = $this->cashfree->buildOrderPayload(
             $orderId,
             (string) $buyer->id,
             $buyer->email ?? '',
@@ -265,7 +276,7 @@ class MarketplaceService
             $buyer->name
         );
 
-        $response = $cashfree->createOrder($payload);
+        $response = $this->cashfree->createOrder($payload);
 
         $payment->update([
             'gateway_response' => $response,
