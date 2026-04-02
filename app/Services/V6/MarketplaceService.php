@@ -237,7 +237,8 @@ class MarketplaceService
                     'conversation_id' => $conversationId,
                     'buyer_name' => $buyer->name
                 ],
-                route('v6.marketplace.show', $listing->id)
+                route('v6.marketplace.show', $listing->id),
+                'high'
             );
 
             return $conversationId;
@@ -397,6 +398,24 @@ class MarketplaceService
                 $order->id,
                 MarketplaceOrder::class,
                 "Sale of listing: {$listing->title}"
+            );
+
+            // 4. Update Trending Score
+            $this->incrementTrending($listing->id);
+
+            // 5. Notify Seller via Firebase
+            $this->notificationService->createUserNotification(
+                $listing->user_id,
+                'Item Sold!',
+                "Your listing '{$listing->title}' has been purchased for ₹{$listing->price}.",
+                'marketplace_sale',
+                [
+                    'listing_id' => $listing->id,
+                    'order_id' => $order->id,
+                    'amount' => $listing->price
+                ],
+                route('v6.marketplace.my-listings'),
+                'high'
             );
         });
     }
