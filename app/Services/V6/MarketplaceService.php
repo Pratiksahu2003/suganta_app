@@ -13,6 +13,7 @@ use App\Models\Wallet;
 use App\Services\CashfreeService;
 use App\Services\NotificationService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
@@ -24,10 +25,12 @@ class MarketplaceService
     private const CACHE_TAG = 'marketplace_listings';
     private const COMMISSION_PERCENT = 10; // 10% platform commission
     protected $notificationService;
+    protected $cashfree;
 
-    public function __construct(NotificationService $notificationService)
+    public function __construct(NotificationService $notificationService, CashfreeService $cashfree)
     {
         $this->notificationService = $notificationService;
+        $this->cashfree = $cashfree;
     }
 
     /**
@@ -264,7 +267,74 @@ class MarketplaceService
 
         $response = $cashfree->createOrder($payload);
 
-        return $cashfree->getCheckoutUrl($response);
+        $payment->update([
+            'gateway_response' => $response,
+            'status' => 'pending'
+        ]);
+
+        return $this->buildProxyCheckoutUrl($orderId);
+    }
+
+    /**
+     * Get fresh checkout data for an existing marketplace payment.
+     */
+    public function getFreshCheckoutData(Payment $payment): ?array
+    {
+        if ($payment->status === 'success') {
+            return ['already_paid' => true];
+        }
+
+        if (!in_array($payment->status, ['created', 'pending'], true)) {
+            return null;
+        }
+
+        try {
+            $freshOrder = $this->cashfree->getOrder($payment->order_id);
+            $orderStatus = strtoupper($freshOrder['order_status'] ?? '');
+
+            if ($this->cashfree->isOrderPaid($freshOrder)) {
+                $this->processSuccessfulPayment($payment, $freshOrder);
+                return ['already_paid' => true];
+            }
+
+            if (in_array($orderStatus, ['ACTIVE'], true)) {
+                $payment->update(['gateway_response' => $freshOrder]);
+                $checkoutUrl = $this->cashfree->getCheckoutUrl($freshOrder);
+
+                if ($checkoutUrl) {
+                    return [
+                        'checkout_url' => $checkoutUrl,
+                        'payment_session_id' => $freshOrder['payment_session_id'] ?? null,
+                    ];
+                }
+            }
+
+            $payment->update(['status' => 'failed', 'gateway_response' => $freshOrder]);
+            return null;
+        } catch (\Exception $e) {
+            Log::error('Failed to get fresh checkout data for marketplace payment', [
+                'payment_id' => $payment->id,
+                'order_id' => $payment->order_id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Build the standard checkout proxy URL for this order.
+     */
+    private function buildProxyCheckoutUrl(string $orderId): string
+    {
+        $parsed = parse_url(rtrim(config('app.url', 'http://localhost'), '/'));
+        $baseUrl = ($parsed['scheme'] ?? 'https') . '://' . ($parsed['host'] ?? 'localhost');
+
+        if (!empty($parsed['port'])) {
+            $baseUrl .= ':' . $parsed['port'];
+        }
+
+        return $baseUrl . '/api/v1/payment/checkout?order_id=' . $orderId;
     }
 
     /**

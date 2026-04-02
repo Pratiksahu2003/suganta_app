@@ -185,6 +185,8 @@ class PaymentController extends BaseApiController
                 $checkoutData = $this->subscriptionService->getFreshCheckoutData($payment);
             } elseif ($paymentType === 'note') {
                 $checkoutData = $this->notePurchaseService->getFreshCheckoutData($payment);
+            } elseif ($paymentType === 'marketplace') {
+                $checkoutData = $this->marketplaceService->getFreshCheckoutData($payment);
             } else {
                 $checkoutData = $this->registrationPaymentService->getFreshCheckoutData($payment);
             }
