@@ -8,11 +8,12 @@ use App\Models\MarketplaceOrder;
 use App\Models\SubscriptionPlan;
 use App\Services\V6\MarketplaceService;
 use App\Traits\HandlesFileStorage;
+use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
 
 class MarketplaceController extends Controller
 {
-    use HandlesFileStorage;
+    use HandlesFileStorage, ApiResponse;
 
     protected $service;
 
@@ -34,11 +35,7 @@ class MarketplaceController extends Controller
         $filters['exclude_user_id'] = auth()->id();
         
         $listings = $this->service->getListings($filters);
-
-        return response()->json([
-            'status' => 'success',
-            'data' => $listings
-        ]);
+        return $this->success('Listings retrieved successfully', $listings);
     }
 
     /**
@@ -48,11 +45,7 @@ class MarketplaceController extends Controller
     {
         $listing = MarketplaceListing::active()->with('user:id,name,profile_image')->findOrFail($id);
         $this->service->recordView($listing->id);
-
-        return response()->json([
-            'status' => 'success',
-            'data' => $listing
-        ]);
+        return $this->success('Listing details retrieved', $listing);
     }
 
     /**
@@ -60,10 +53,7 @@ class MarketplaceController extends Controller
      */
     public function trending()
     {
-        return response()->json([
-            'status' => 'success',
-            'data' => $this->service->getTrending(10)
-        ]);
+        return $this->success('Trending listings retrieved', $this->service->getTrending(10));
     }
 
     /**
@@ -72,7 +62,7 @@ class MarketplaceController extends Controller
     public function getPlans()
     {
         $plans = SubscriptionPlan::active()->where('s_type', 6)->orderBy('price')->get();
-        return response()->json(['status' => 'success', 'data' => $plans]);
+        return $this->success('Marketplace plans retrieved', $plans);
     }
 
     // ==========================================
@@ -88,12 +78,9 @@ class MarketplaceController extends Controller
         
         try {
             $checkoutUrl = $this->service->initiatePayment(auth()->user(), $listing);
-            return response()->json([
-                'status' => 'success',
-                'checkout_url' => $checkoutUrl
-            ]);
+            return $this->success('Checkout URL generated', ['checkout_url' => $checkoutUrl]);
         } catch (\Exception $e) {
-            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 400);
+            return $this->error($e->getMessage());
         }
     }
 
@@ -106,13 +93,9 @@ class MarketplaceController extends Controller
         
         try {
             $conversationId = $this->service->initiateChat(auth()->user(), $listing);
-            return response()->json([
-                'status' => 'success',
-                'message' => 'Conversation initiated.',
-                'conversation_id' => $conversationId
-            ]);
+            return $this->success('Conversation initiated', ['conversation_id' => $conversationId]);
         } catch (\Exception $e) {
-            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 400);
+            return $this->error($e->getMessage());
         }
     }
 
@@ -125,11 +108,10 @@ class MarketplaceController extends Controller
         $order = $this->service->validateDownloadToken($token);
 
         if (!$order || $order->listing_id != $id || $order->user_id !== auth()->id()) {
-            return response()->json(['status' => 'error', 'message' => 'Invalid or expired access.'], 403);
+            return $this->forbidden('Invalid or expired access.');
         }
 
-        return response()->json([
-            'status' => 'success',
+        return $this->success('Download link generated', [
             'download_path' => $this->getFileUrl($order->listing->file_path)
         ]);
     }
@@ -144,7 +126,7 @@ class MarketplaceController extends Controller
     public function myListings()
     {
         $listings = auth()->user()->marketplaceListings()->latest()->paginate(15);
-        return response()->json(['status' => 'success', 'data' => $listings]);
+        return $this->paginated($listings, 'My listings retrieved');
     }
 
     /**
@@ -175,9 +157,9 @@ class MarketplaceController extends Controller
             }
 
             $listing = $this->service->createListing(auth()->user(), $validated);
-            return response()->json(['status' => 'success', 'data' => $listing], 201);
+            return $this->created($listing, 'Listing created successfully');
         } catch (\Exception $e) {
-            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 400);
+            return $this->error($e->getMessage());
         }
     }
 
@@ -211,8 +193,7 @@ class MarketplaceController extends Controller
         }
 
         $listing->update($validated);
-        
-        return response()->json(['status' => 'success', 'data' => $listing]);
+        return $this->success('Listing updated successfully', $listing);
     }
 
     /**
@@ -227,7 +208,6 @@ class MarketplaceController extends Controller
         }
         
         $listing->delete();
-
-        return response()->json(['status' => 'success', 'message' => 'Listing removed.']);
+        return $this->success('Listing removed');
     }
 }
