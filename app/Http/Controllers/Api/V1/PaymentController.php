@@ -22,7 +22,8 @@ class PaymentController extends BaseApiController
         protected CashfreeService $cashfree,
         protected RegistrationPaymentService $registrationPaymentService,
         protected SubscriptionService $subscriptionService,
-        protected NotePurchaseService $notePurchaseService
+        protected NotePurchaseService $notePurchaseService,
+        protected \App\Services\V6\MarketplaceService $marketplaceService
     ) {}
 
     /**
@@ -603,6 +604,22 @@ HTML;
                     ]);
                 }
                 break;
+
+            case 'marketplace':
+                try {
+                    $this->marketplaceService->processSuccessfulPayment($payment, $paymentData);
+                    Log::info('Marketplace payment processed successfully', [
+                        'order_id' => $orderId,
+                        'payment_id' => $payment->id,
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('Failed to process marketplace payment', [
+                        'order_id' => $orderId,
+                        'payment_id' => $payment->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+                break;
                 
             default:
                 Log::warning('Payment success webhook: unknown payment type', [
@@ -659,6 +676,22 @@ HTML;
                 ]);
                 
                 Log::info('Note purchase payment failed', [
+                    'order_id' => $orderId,
+                    'payment_id' => $payment->id,
+                ]);
+                break;
+
+            case 'marketplace':
+                $payment->update([
+                    'status' => 'failed',
+                    'processed_at' => now(),
+                    'gateway_response' => array_merge(
+                        $payment->gateway_response ?? [],
+                        ['payment_data' => $paymentData]
+                    ),
+                ]);
+                
+                Log::info('Marketplace payment failed', [
                     'order_id' => $orderId,
                     'payment_id' => $payment->id,
                 ]);

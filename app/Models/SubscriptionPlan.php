@@ -23,6 +23,7 @@ class SubscriptionPlan extends Model
         'is_active',
         'sort_order',
         's_type',
+        'max_listings',
     ];
 
     protected $casts = [
@@ -34,6 +35,7 @@ class SubscriptionPlan extends Model
         'is_active' => 'boolean',
         'sort_order' => 'integer',
         's_type' => 'integer',
+        'max_listings' => 'integer',
     ];
 
     /**

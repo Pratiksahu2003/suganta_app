@@ -718,4 +718,38 @@ class User extends Authenticatable implements MustVerifyEmail, CanResetPassword
     {
         return $this->hasMany(User::class, 'referred_by', 'phone');
     }
+
+    // ===== MARKETPLACE (V6) =====
+
+    /**
+     * Get marketplace listings for the user
+     */
+    public function marketplaceListings()
+    {
+        return $this->hasMany(MarketplaceListing::class);
+    }
+
+    /**
+     * Get marketplace orders for the user (as a buyer)
+     */
+    public function marketplaceOrders()
+    {
+        return $this->hasMany(MarketplaceOrder::class);
+    }
+
+    /**
+     * Get core marketplace subscription
+     */
+    public function marketplaceSubscription()
+    {
+        return $this->activeSubscriptionForType(6);
+    }
+
+    /**
+     * Get current marketplace listing count for the user
+     */
+    public function getCurrentMarketplaceListingCount(): int
+    {
+        return $this->marketplaceListings()->where('status', 'active')->count();
+    }
 }
