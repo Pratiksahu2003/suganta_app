@@ -19,7 +19,6 @@ use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\PublicTeacherController;
 use App\Http\Controllers\Api\V1\PublicInstituteController;
-use App\Http\Controllers\Api\V1\WalletController;
 
 Route::prefix(config('api.version', 'v1'))->group(function (): void {
     // Auth Routes
@@ -112,11 +111,6 @@ Route::prefix(config('api.version', 'v1'))->group(function (): void {
         Route::get('/', 'index');
         Route::get('status', 'status');
         Route::get('invoice/{orderId}', 'invoice');
-    });
-
-    // Wallet Routes
-    Route::middleware('auth:sanctum')->prefix('wallet')->controller(WalletController::class)->group(function () {
-        Route::get('/', 'index');
     });
 
     // Portfolio Routes (one portfolio per user only)

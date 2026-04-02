@@ -7,10 +7,13 @@ use App\Models\MarketplaceListing;
 use App\Models\MarketplaceOrder;
 use App\Models\SubscriptionPlan;
 use App\Services\V6\MarketplaceService;
+use App\Traits\HandlesFileStorage;
 use Illuminate\Http\Request;
 
 class MarketplaceController extends Controller
 {
+    use HandlesFileStorage;
+
     protected $service;
 
     public function __construct(MarketplaceService $service)
@@ -127,7 +130,7 @@ class MarketplaceController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'download_path' => $order->listing->file_path
+            'download_path' => $this->getFileUrl($order->listing->file_path)
         ]);
     }
 
@@ -155,13 +158,22 @@ class MarketplaceController extends Controller
             'price' => 'required|numeric|min:0',
             'category' => 'nullable|string',
             'type' => 'required|in:soft,hard',
-            'file_path' => 'required_if:type,soft|string',
+            'file_path' => 'required_if:type,soft|file|mimes:pdf,doc,docx,zip,rar,txt|max:51200',
             'thumbnail' => 'nullable|string',
             'images' => 'required|array|min:4|max:6',
             'images.*' => 'required|string',
         ]);
 
         try {
+            if ($request->hasFile('file_path')) {
+                $validated['file_path'] = $this->uploadFile(
+                    $request->file('file_path'),
+                    auth()->id(),
+                    'soft_copy',
+                    'marketplace'
+                );
+            }
+
             $listing = $this->service->createListing(auth()->user(), $validated);
             return response()->json(['status' => 'success', 'data' => $listing], 201);
         } catch (\Exception $e) {
@@ -181,8 +193,22 @@ class MarketplaceController extends Controller
             'description' => 'sometimes|string',
             'price' => 'sometimes|numeric|min:0',
             'status' => 'sometimes|in:active,sold,inactive',
+            'file_path' => 'sometimes|file|mimes:pdf,doc,docx,zip,rar,txt|max:51200',
             'images' => 'sometimes|array|min:4|max:6',
+            'images.*' => 'sometimes|string',
         ]);
+
+        if ($request->hasFile('file_path')) {
+            if ($listing->file_path) {
+                $this->deleteFile($listing->file_path);
+            }
+            $validated['file_path'] = $this->uploadFile(
+                $request->file('file_path'),
+                auth()->id(),
+                'soft_copy',
+                'marketplace'
+            );
+        }
 
         $listing->update($validated);
         
@@ -195,6 +221,11 @@ class MarketplaceController extends Controller
     public function destroy($id)
     {
         $listing = auth()->user()->marketplaceListings()->findOrFail($id);
+        
+        if ($listing->file_path) {
+            $this->deleteFile($listing->file_path);
+        }
+        
         $listing->delete();
 
         return response()->json(['status' => 'success', 'message' => 'Listing removed.']);

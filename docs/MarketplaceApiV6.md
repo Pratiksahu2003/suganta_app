@@ -42,8 +42,7 @@ The marketplace implements an automated wallet-based payout system for **Soft Co
 2. **Automated Payout**: The remaining **90%** (Seller Amount) is instantly credited to the seller's SuGanta Wallet.
 3. **Transparency**: Both the buyer's total payment and the seller's net credit are recorded in the `MarketplaceOrder` and `WalletTransaction` records.
 
-> [!TIP]
-> Sellers can track their automated payouts and current balance using the [**Wallet API (v1)**](file:///c:/Users/NXTGN/Desktop/SuGanta_API/docs/WalletApi.md).
+> Sellers can track their automated payouts and current balance using the **Wallet API (`/api/wallet`)**.
 
 > [!NOTE]
 > For **Hard Copy** listings, the platform does not handle payments. Users are expected to negotiate and complete transactions independently via the integrated chat system.
@@ -205,11 +204,11 @@ Secure download link retrieval for purchased soft copies. Requires a `token` (us
 ---
 
 ## 8. Create Listing
-Create a new marketplace listing. Use `POST` with JSON payload.
+Create a new marketplace listing. Use `POST` with `multipart/form-data` payload.
 
 | | |
 |---|---|
-| **Endpoint** | `POST /api/marketplace/my-listings` |
+| **Endpoint** | `POST /api/v6/marketplace/my-listings` |
 | **Access** | Protected (auth:sanctum) |
 
 ### Request Body
@@ -219,7 +218,7 @@ Create a new marketplace listing. Use `POST` with JSON payload.
 | description | string | Yes | Detailed description |
 | price | numeric | Yes | Cost in INR (min 0) |
 | type | string | Yes | `soft` or `hard` |
-| file_path | string | Required if type=soft | S3/Cloud Storage path for file |
+| file_path | file | Required if type=soft | Direct file upload (max 50MB, pdf, doc, docx, zip, rar, txt) |
 | category | string | No | Listing category |
 | thumbnail| string | No | URL to thumbnail image |
 | images | array | Yes | Exactly 4 to 6 image URLs |
@@ -235,11 +234,11 @@ Create a new marketplace listing. Use `POST` with JSON payload.
 ---
 
 ## 9. Update Listing
-Modify your existing listing.
+Modify your existing listing. If you are uploading a new `file_path` file, ensure to send the request as `POST` with `_method=PUT` and `multipart/form-data`.
 
 | | |
 |---|---|
-| **Endpoint** | `PUT /api/marketplace/my-listings/{id}` |
+| **Endpoint** | `PUT /api/v6/marketplace/my-listings/{id}` |
 | **Access** | Protected (auth:sanctum) |
 
 ### Request Body (Optional Fields)
@@ -249,6 +248,7 @@ Modify your existing listing.
 | description | string | Update description |
 | price | numeric | Update price |
 | status | string | `active`, `sold`, `inactive` |
+| file_path | file | Upload replacement soft copy |
 | images | array | Update image set |
 
 ---

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\V1\WalletController;
 use App\Http\Controllers\Api\V6\MarketplaceController;
 use Illuminate\Support\Facades\Route;
 
@@ -27,4 +28,9 @@ Route::prefix('marketplace')->middleware('auth:sanctum')->group(function () {
     Route::post('my-listings', [MarketplaceController::class, 'store']); // Create
     Route::put('my-listings/{id}', [MarketplaceController::class, 'update']); // Edit
     Route::delete('my-listings/{id}', [MarketplaceController::class, 'destroy']); // Remove
+});
+
+// Wallet Routes
+Route::middleware('auth:sanctum')->prefix('wallet')->controller(WalletController::class)->group(function () {
+    Route::get('/', 'index');
 });
