@@ -102,17 +102,6 @@ class MarketplaceService
         return $listing;
     }
 
-    /**
-     * Record a view and update trending (Redis Sorted Set)
-     */
-    public function recordView(int $listingId)
-    {
-        // Increment global trending score
-        Redis::zincrby(self::TRENDING_KEY, 1, $listingId);
-
-        // Update DB periodically (optional sync)
-        MarketplaceListing::where('id', $listingId)->increment('views_count');
-    }
 
     /**
      * Get trending listings from Redis
@@ -173,6 +162,23 @@ class MarketplaceService
             ->with(['listing', 'listing.user', 'listing.user.profile'])
             ->orderByDesc('created_at')
             ->paginate(15);
+    }
+
+    /**
+     * Track listing view and update trending score
+     */
+    public function recordView($id)
+    {
+        MarketplaceListing::where('id', $id)->increment('views_count');
+        $this->incrementTrending($id, 1); // Views give 1 point
+    }
+
+    /**
+     * Update trending ranking in Redis
+     */
+    public function incrementTrending($id, int $points = 5)
+    {
+        Redis::zincrby(self::TRENDING_KEY, $points, $id);
     }
 
     /**
@@ -315,6 +321,11 @@ class MarketplaceService
         try {
             $freshOrder = $this->cashfree->getOrder($payment->order_id);
             $orderStatus = strtoupper($freshOrder['order_status'] ?? '');
+
+            if ($this->cashfree->isOrderPaid($freshOrder)) {
+                $this->processSuccessfulPayment($payment, $freshOrder);
+                return ['already_paid' => true];
+            }
 
             if (in_array($orderStatus, ['ACTIVE'], true)) {
                 $payment->update(['gateway_response' => $freshOrder]);
