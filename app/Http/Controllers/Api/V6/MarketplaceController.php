@@ -141,17 +141,35 @@ class MarketplaceController extends Controller
             'category' => 'nullable|string',
             'type' => 'required|in:soft,hard',
             'file_path' => 'required_if:type,soft|file|mimes:pdf,doc,docx,zip,rar,txt|max:51200',
-            'thumbnail' => 'nullable|string',
+            'thumbnail' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:3072',
             'images' => 'required|array|min:4|max:6',
-            'images.*' => 'required|string',
+            'images.*' => 'required|image|mimes:jpeg,png,jpg,gif|max:3072',
         ]);
 
         try {
+            if ($request->hasFile('images')) {
+                $validated['images'] = $this->uploadMultipleFiles(
+                    $request->file('images'),
+                    auth()->id(),
+                    'image',
+                    'marketplace'
+                );
+            }
+
             if ($request->hasFile('file_path')) {
                 $validated['file_path'] = $this->uploadFile(
                     $request->file('file_path'),
                     auth()->id(),
                     'soft_copy',
+                    'marketplace'
+                );
+            }
+
+            if ($request->hasFile('thumbnail')) {
+                $validated['thumbnail'] = $this->uploadFile(
+                    $request->file('thumbnail'),
+                    auth()->id(),
+                    'thumbnail',
                     'marketplace'
                 );
             }
@@ -176,9 +194,35 @@ class MarketplaceController extends Controller
             'price' => 'sometimes|numeric|min:0',
             'status' => 'sometimes|in:active,sold,inactive',
             'file_path' => 'sometimes|file|mimes:pdf,doc,docx,zip,rar,txt|max:51200',
+            'thumbnail' => 'sometimes|image|mimes:jpeg,png,jpg,gif|max:3072',
             'images' => 'sometimes|array|min:4|max:6',
-            'images.*' => 'sometimes|string',
+            'images.*' => 'sometimes|image|mimes:jpeg,png,jpg,gif|max:3072',
         ]);
+
+        if ($request->hasFile('images')) {
+            // Delete old images if they exist
+            if (!empty($listing->images)) {
+                $this->deleteMultipleFiles($listing->images);
+            }
+            $validated['images'] = $this->uploadMultipleFiles(
+                $request->file('images'),
+                auth()->id(),
+                'image',
+                'marketplace'
+            );
+        }
+
+        if ($request->hasFile('thumbnail')) {
+            if ($listing->thumbnail) {
+                $this->deleteFile($listing->thumbnail);
+            }
+            $validated['thumbnail'] = $this->uploadFile(
+                $request->file('thumbnail'),
+                auth()->id(),
+                'thumbnail',
+                'marketplace'
+            );
+        }
 
         if ($request->hasFile('file_path')) {
             if ($listing->file_path) {
@@ -205,6 +249,14 @@ class MarketplaceController extends Controller
         
         if ($listing->file_path) {
             $this->deleteFile($listing->file_path);
+        }
+
+        if ($listing->thumbnail) {
+            $this->deleteFile($listing->thumbnail);
+        }
+
+        if (!empty($listing->images)) {
+            $this->deleteMultipleFiles($listing->images);
         }
         
         $listing->delete();
