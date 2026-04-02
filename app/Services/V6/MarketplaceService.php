@@ -11,6 +11,7 @@ use App\Models\Chat\ChatMessage;
 use App\Models\User;
 use App\Models\Wallet;
 use App\Services\CashfreeService;
+use App\Services\NotificationService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Redis;
@@ -22,6 +23,12 @@ class MarketplaceService
     private const USER_COUNT_KEY = 'marketplace:user:{id}:listings_count';
     private const CACHE_TAG = 'marketplace_listings';
     private const COMMISSION_PERCENT = 10; // 10% platform commission
+    protected $notificationService;
+
+    public function __construct(NotificationService $notificationService)
+    {
+        $this->notificationService = $notificationService;
+    }
 
     /**
      * Get all active listings with caching
@@ -203,6 +210,20 @@ class MarketplaceService
                 'message' => "I am interested in your listing: {$listing->title}. Is it still available?",
                 'type' => 'text',
             ]);
+
+            // 4. Send Push Notification to Seller
+            $this->notificationService->createUserNotification(
+                $seller->id,
+                'New Marketplace Interest',
+                "{$buyer->name} is interested in your listing: {$listing->title}",
+                'marketplace_contact',
+                [
+                    'listing_id' => $listing->id,
+                    'conversation_id' => $conversationId,
+                    'buyer_name' => $buyer->name
+                ],
+                route('v6.marketplace.show', $listing->id)
+            );
 
             return $conversationId;
         });

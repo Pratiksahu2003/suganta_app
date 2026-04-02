@@ -12,10 +12,10 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('marketplace')->middleware('auth:sanctum')->group(function () {
     // Public Marketplace (Discovery)
-    Route::get('listings', [MarketplaceController::class, 'index']); // All listings
-    Route::get('listings/{id}', [MarketplaceController::class, 'show']); // Detail
-    Route::get('trending', [MarketplaceController::class, 'trending']); // Redis Trending
-    Route::get('plans', [MarketplaceController::class, 'getPlans']); // Subscription Plans
+    Route::get('listings', [MarketplaceController::class, 'index'])->name('v6.marketplace.index');
+    Route::get('listings/{id}', [MarketplaceController::class, 'show'])->name('v6.marketplace.show');
+    Route::get('trending', [MarketplaceController::class, 'trending'])->name('v6.marketplace.trending');
+    Route::get('plans', [MarketplaceController::class, 'getPlans'])->name('v6.marketplace.plans');
 
     // Authenticated Marketplace Actions
     // Buyer Interactions
