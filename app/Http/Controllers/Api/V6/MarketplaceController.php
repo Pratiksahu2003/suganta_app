@@ -123,11 +123,23 @@ class MarketplaceController extends Controller
     /**
      * List my own listings
      */
-    public function myListings()
-    {
-        $listings = auth()->user()->marketplaceListings()->latest()->paginate(15);
-        return $this->paginated($listings, 'My listings retrieved');
-    }
+ public function myListings()
+{
+    $listings = auth()->user()
+        ->marketplaceListings()
+        ->with([
+            'user:id,name',
+            'user.profile:id,user_id,profile_image'
+        ])
+        ->latest()
+        ->paginate(15);
+
+    $listings->getCollection()->transform(function ($listing) {
+        return $this->formatListing($listing);
+    });
+
+    return $this->paginated($listings, 'My listings retrieved');
+}
 
     /**
      * Create new listing
@@ -262,4 +274,40 @@ class MarketplaceController extends Controller
         $listing->delete();
         return $this->success('Listing removed');
     }
+
+    private function formatListing($listing)
+{
+    return [
+        'id' => $listing->id,
+        'user_id' => $listing->user_id,
+        'title' => $listing->title,
+        'description' => $listing->description,
+        'price' => $listing->price,
+        'category' => $listing->category,
+        'type' => $listing->type,
+
+        'file_path' => storage_file_url($listing->file_path),
+
+        'thumbnail' => storage_file_url($listing->thumbnail),
+
+        'images' => collect($listing->images ?? [])
+            ->map(fn($img) => storage_file_url($img))
+            ->values(),
+
+        'status' => $listing->status,
+        'views_count' => $listing->views_count,
+        'created_at' => $listing->created_at,
+
+        'user' => [
+            'id' => $listing->user->id ?? null,
+            'name' => $listing->user->name ?? null,
+
+            'profile' => [
+                'image' => storage_file_url(
+                    $listing->user?->profile?->profile_image
+                ) ?? storage_file_url('default/profile.png')
+            ]
+        ]
+    ];
+}
 }
