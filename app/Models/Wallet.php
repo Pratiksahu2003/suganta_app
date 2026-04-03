@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Support\Facades\DB;
 
 class Wallet extends Model
 {
@@ -43,45 +44,51 @@ class Wallet extends Model
      */
     public function credit(float $amount, string $transactionType, $referenceId = null, string $referenceType = null, string $description = null, array $meta = [])
     {
-        // 1. Idempotency Check: check for existing credit for this reference
-        if ($referenceId && $referenceType) {
-            $existing = WalletTransaction::where('wallet_id', $this->id)
-                ->where('type', 'credit')
-                ->where('reference_id', $referenceId)
-                ->where('reference_type', $referenceType)
-                ->first();
-            
-            if ($existing) {
-                \Illuminate\Support\Facades\Log::warning('Wallet credit idempotency hit', [
-                    'wallet_id' => $this->id,
-                    'reference_id' => $referenceId,
-                    'reference_type' => $referenceType
-                ]);
-                return $this;
+        return DB::transaction(function () use ($amount, $transactionType, $referenceId, $referenceType, $description, $meta) {
+            // 1. Lock the wallet row to prevent concurrent updates
+            static::where('id', $this->id)->lockForUpdate()->first();
+            $this->refresh();
+
+            // 2. Idempotency Check: check for existing credit for this reference
+            if ($referenceId && $referenceType) {
+                $existing = WalletTransaction::where('wallet_id', $this->id)
+                    ->where('type', 'credit')
+                    ->where('reference_id', $referenceId)
+                    ->where('reference_type', $referenceType)
+                    ->first();
+                
+                if ($existing) {
+                    \Illuminate\Support\Facades\Log::warning('Wallet credit idempotency hit (locked)', [
+                        'wallet_id' => $this->id,
+                        'reference_id' => $referenceId,
+                        'reference_type' => $referenceType
+                    ]);
+                    return $this;
+                }
             }
-        }
 
-        $balanceBefore = $this->balance;
-        $this->balance += $amount;
-        $this->total_earned += $amount;
-        $this->save();
+            $balanceBefore = $this->balance;
+            $this->balance += $amount;
+            $this->total_earned += $amount;
+            $this->save();
 
-        // Create transaction record
-        WalletTransaction::create([
-            'wallet_id' => $this->id,
-            'user_id' => $this->user_id,
-            'type' => 'credit',
-            'amount' => $amount,
-            'balance_before' => $balanceBefore,
-            'balance_after' => $this->balance,
-            'transaction_type' => $transactionType,
-            'reference_id' => $referenceId,
-            'reference_type' => $referenceType,
-            'description' => $description,
-            'meta' => $meta,
-        ]);
+            // 3. Create transaction record
+            WalletTransaction::create([
+                'wallet_id' => $this->id,
+                'user_id' => $this->user_id,
+                'type' => 'credit',
+                'amount' => $amount,
+                'balance_before' => $balanceBefore,
+                'balance_after' => $this->balance,
+                'transaction_type' => $transactionType,
+                'reference_id' => $referenceId,
+                'reference_type' => $referenceType,
+                'description' => $description,
+                'meta' => $meta,
+            ]);
 
-        return $this;
+            return $this;
+        });
     }
 
     /**

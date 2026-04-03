@@ -372,53 +372,51 @@ class MarketplaceService
      */
     public function processSuccessfulPayment(Payment $payment, array $paymentData)
     {
-        // 1. Idempotency Check: already processed?
+        // 1. Initial Quick Check (Pre-lock)
         if ($payment->status === 'success') {
-            Log::info('Marketplace payment already processed (success status)', ['order_id' => $payment->order_id]);
+            Log::info('Marketplace payment already success (pre-lock)', ['order_id' => $payment->order_id]);
             return;
         }
 
-        // 2. Extra Safety: check for existing order by payment ID
-        $existingOrder = MarketplaceOrder::where('payment_id', $payment->id)->first();
-        if ($existingOrder) {
-            $payment->update(['status' => 'success', 'processed_at' => now()]);
-            Log::info('Marketplace payment already processed (order exists)', ['order_id' => $payment->order_id]);
-            return;
-        }
+        // 2. Atomic Transaction with Lock
+        DB::transaction(function () use ($payment, $paymentData) {
+            // Relock the payment row to prevent race conditions
+            $lockedPayment = Payment::where('id', $payment->id)->lockForUpdate()->first();
 
-        $listingId = $payment->meta['listing_id'] ?? null;
-        if (!$listingId)
-            return;
+            if (!$lockedPayment || $lockedPayment->status === 'success') {
+                return; // Already processed by another thread
+            }
 
-        $listing = MarketplaceListing::with('user')->find($listingId);
-        if (!$listing)
-            return;
+            // check once more if an order already exists for this payment
+            $existingOrder = MarketplaceOrder::where('payment_id', $lockedPayment->id)->first();
+            if ($existingOrder) {
+                $lockedPayment->update(['status' => 'success', 'processed_at' => now()]);
+                return;
+            }
 
-        DB::transaction(function () use ($payment, $listing, $paymentData) {
-            // 3. Mark payment as successful IMMEDIATELY
-            $payment->update([
-                'status' => 'success',
-                'processed_at' => now(),
-                'gateway_response' => array_merge($payment->gateway_response ?? [], ['payment_data' => $paymentData])
-            ]);
+            $listingId = $lockedPayment->meta['listing_id'] ?? null;
+            if (!$listingId) return;
 
-            // 4. Calculate amounts (Commission & Seller Payout)
-            $totalAmount = (float) $payment->amount;
+            $listing = MarketplaceListing::with('user')->find($listingId);
+            if (!$listing) return;
+
+            // 3. Calculate amounts (Commission & Seller Payout)
+            $totalAmount = (float) $lockedPayment->amount;
             $commissionAmount = ($totalAmount * self::COMMISSION_PERCENT) / 100;
             $sellerAmount = $totalAmount - $commissionAmount;
 
-            // 5. Create MarketplaceOrder
+            // 4. Create MarketplaceOrder
             $order = MarketplaceOrder::create([
-                'user_id' => $payment->user_id,
+                'user_id' => $lockedPayment->user_id,
                 'listing_id' => $listing->id,
                 'amount' => $totalAmount,
                 'commission_amount' => $commissionAmount,
                 'seller_amount' => $sellerAmount,
-                'payment_id' => $payment->id,
+                'payment_id' => $lockedPayment->id,
                 'status' => 'completed'
             ]);
 
-            // 6. Credit Seller's Wallet
+            // 5. Credit Seller's Wallet (Wallet::credit also has idempotency)
             Wallet::getOrCreate($listing->user_id)->credit(
                 $sellerAmount,
                 'marketplace_sale',
@@ -426,6 +424,13 @@ class MarketplaceService
                 MarketplaceOrder::class,
                 "Sale of listing: {$listing->title}"
             );
+
+            // 6. Update Payment status
+            $lockedPayment->update([
+                'status' => 'success',
+                'processed_at' => now(),
+                'gateway_response' => array_merge($lockedPayment->gateway_response ?? [], ['payment_data' => $paymentData])
+            ]);
 
             // 7. Update Trending Score
             $this->incrementTrending($listing->id);
@@ -444,6 +449,8 @@ class MarketplaceService
                 route('v6.marketplace.my-listings'),
                 'high'
             );
+
+            Log::info('Marketplace payment processed successfully', ['payment_id' => $lockedPayment->id]);
         });
     }
 }
