@@ -209,6 +209,12 @@ class SubscriptionService
      */
     public function processSuccessfulPayment(Payment $payment, array $gatewayResponse = []): UserSubscription
     {
+        // 1. Idempotency Check
+        if ($payment->status === 'success') {
+            $existing = UserSubscription::where('payment_id', $payment->id)->first();
+            if ($existing) return $existing;
+        }
+
         return DB::transaction(function () use ($payment, $gatewayResponse) {
             // Update payment status
             $payment->update([

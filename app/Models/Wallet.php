@@ -43,6 +43,24 @@ class Wallet extends Model
      */
     public function credit(float $amount, string $transactionType, $referenceId = null, string $referenceType = null, string $description = null, array $meta = [])
     {
+        // 1. Idempotency Check: check for existing credit for this reference
+        if ($referenceId && $referenceType) {
+            $existing = WalletTransaction::where('wallet_id', $this->id)
+                ->where('type', 'credit')
+                ->where('reference_id', $referenceId)
+                ->where('reference_type', $referenceType)
+                ->first();
+            
+            if ($existing) {
+                \Illuminate\Support\Facades\Log::warning('Wallet credit idempotency hit', [
+                    'wallet_id' => $this->id,
+                    'reference_id' => $referenceId,
+                    'reference_type' => $referenceType
+                ]);
+                return $this;
+            }
+        }
+
         $balanceBefore = $this->balance;
         $this->balance += $amount;
         $this->total_earned += $amount;

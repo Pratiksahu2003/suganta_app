@@ -368,10 +368,24 @@ class MarketplaceService
     }
 
     /**
-     * Process successful payment (called from PaymentController webhook)
+     * Process successful payment (called from PaymentController webhook or callback)
      */
     public function processSuccessfulPayment(Payment $payment, array $paymentData)
     {
+        // 1. Idempotency Check: already processed?
+        if ($payment->status === 'success') {
+            Log::info('Marketplace payment already processed (success status)', ['order_id' => $payment->order_id]);
+            return;
+        }
+
+        // 2. Extra Safety: check for existing order by payment ID
+        $existingOrder = MarketplaceOrder::where('payment_id', $payment->id)->first();
+        if ($existingOrder) {
+            $payment->update(['status' => 'success', 'processed_at' => now()]);
+            Log::info('Marketplace payment already processed (order exists)', ['order_id' => $payment->order_id]);
+            return;
+        }
+
         $listingId = $payment->meta['listing_id'] ?? null;
         if (!$listingId)
             return;
@@ -380,13 +394,20 @@ class MarketplaceService
         if (!$listing)
             return;
 
-        DB::transaction(function () use ($payment, $listing) {
-            // 1. Calculate amounts (Commission & Seller Payout)
+        DB::transaction(function () use ($payment, $listing, $paymentData) {
+            // 3. Mark payment as successful IMMEDIATELY
+            $payment->update([
+                'status' => 'success',
+                'processed_at' => now(),
+                'gateway_response' => array_merge($payment->gateway_response ?? [], ['payment_data' => $paymentData])
+            ]);
+
+            // 4. Calculate amounts (Commission & Seller Payout)
             $totalAmount = (float) $payment->amount;
             $commissionAmount = ($totalAmount * self::COMMISSION_PERCENT) / 100;
             $sellerAmount = $totalAmount - $commissionAmount;
 
-            // 2. Create MarketplaceOrder
+            // 5. Create MarketplaceOrder
             $order = MarketplaceOrder::create([
                 'user_id' => $payment->user_id,
                 'listing_id' => $listing->id,
@@ -397,7 +418,7 @@ class MarketplaceService
                 'status' => 'completed'
             ]);
 
-            // 3. Credit Seller's Wallet
+            // 6. Credit Seller's Wallet
             Wallet::getOrCreate($listing->user_id)->credit(
                 $sellerAmount,
                 'marketplace_sale',
@@ -406,10 +427,10 @@ class MarketplaceService
                 "Sale of listing: {$listing->title}"
             );
 
-            // 4. Update Trending Score
+            // 7. Update Trending Score
             $this->incrementTrending($listing->id);
 
-            // 5. Notify Seller via Firebase
+            // 8. Notify Seller via Firebase
             $this->notificationService->createUserNotification(
                 $listing->user_id,
                 'Item Sold!',

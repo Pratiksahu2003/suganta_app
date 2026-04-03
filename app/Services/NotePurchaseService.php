@@ -176,6 +176,12 @@ class NotePurchaseService
      */
     public function processSuccessfulPayment(Payment $payment, array $gatewayResponse = []): NotePurchase
     {
+        // 1. Idempotency Check
+        if ($payment->status === 'success') {
+            $existing = NotePurchase::where('payment_id', $payment->id)->first();
+            if ($existing) return $existing;
+        }
+
         return DB::transaction(function () use ($payment, $gatewayResponse) {
             $payment->update([
                 'status' => 'success',

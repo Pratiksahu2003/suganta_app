@@ -425,6 +425,8 @@ HTML;
                     $this->subscriptionService->processSuccessfulPayment($payment, $cfPaymentData);
                 } elseif ($paymentType === 'note') {
                     $this->notePurchaseService->processSuccessfulPayment($payment, $cfPaymentData);
+                } elseif ($paymentType === 'marketplace') {
+                    $this->marketplaceService->processSuccessfulPayment($payment, $cfPaymentData);
                 } else {
                     $this->registrationPaymentService->handlePaymentSuccess($orderId, $cfPaymentData);
                 }
