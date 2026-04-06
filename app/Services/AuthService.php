@@ -128,9 +128,6 @@ class AuthService
 
                 $this->executeGracefully(function() use ($user) {
                     $this->otpService->sendOtp($user, 'email');
-                    if ($user->phone) {
-                        $this->otpService->sendOtp($user, 'phone');
-                    }
                 }, 'OTP sending failed during registration');
 
                 $requiresPayment = in_array($user->role, config('registration.payment.required_for_roles', []), true);
