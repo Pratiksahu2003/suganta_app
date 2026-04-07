@@ -9,18 +9,13 @@ use Illuminate\Support\Facades\Mail;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
 use App\Services\NotificationService;
+use App\Jobs\SendSystemNotification;
 
 class CheckSubscriptionExpiry extends Command
 {
-    /**
-     * @var NotificationService
-     */
-    protected $notificationService;
-
-    public function __construct(NotificationService $notificationService)
+    public function __construct()
     {
         parent::__construct();
-        $this->notificationService = $notificationService;
     }
     /**
      * The name and signature of the console command.
@@ -51,12 +46,13 @@ class CheckSubscriptionExpiry extends Command
             ->with(['user', 'plan'])
             ->get();
 
+        /** @var \App\Models\UserSubscription $subscription */
         foreach ($expiredSubscriptions as $subscription) {
             $subscription->update(['status' => 'expired']);
 
             if ($subscription->user) {
                 try {
-                    $this->notificationService->createUserNotification(
+                    SendSystemNotification::dispatch(
                         $subscription->user_id,
                         'Subscription Expired',
                         "Your '{$subscription->plan->name}' subscription has expired. Renew now to maintain access.",
@@ -101,6 +97,7 @@ class CheckSubscriptionExpiry extends Command
 
         $this->info("Found " . $subscriptions->count() . " subscriptions expiring in $days days.");
 
+        /** @var \App\Models\UserSubscription $subscription */
         foreach ($subscriptions as $subscription) {
             if ($subscription->user) {
                 // Prepare notification content
@@ -110,7 +107,7 @@ class CheckSubscriptionExpiry extends Command
 
                 // Send Push Notification
                 try {
-                    $this->notificationService->createUserNotification(
+                    SendSystemNotification::dispatch(
                         $subscription->user_id,
                         $title,
                         $message,
@@ -131,7 +128,7 @@ class CheckSubscriptionExpiry extends Command
                 // Send Email
                 if ($subscription->user->email) {
                     try {
-                        Mail::to($subscription->user->email)->send(new SubscriptionExpiryReminder(
+                        Mail::to($subscription->user->email)->queue(new SubscriptionExpiryReminder(
                             $subscription->user,
                             $subscription->expires_at,
                             $days,
