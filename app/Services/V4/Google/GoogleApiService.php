@@ -310,11 +310,16 @@ class GoogleApiService
         );
     }
 
-    public function stopWatchChannel(string $accessToken, string $channelId, string $resourceId): array
+    public function stopWatchChannel(string $accessToken, string $channelId, string $resourceId, string $resourceType = 'calendar'): array
     {
+        $baseUrl = match ($resourceType) {
+            'drive' => $this->driveBaseUrl(),
+            default => $this->calendarBaseUrl(),
+        };
+
         return $this->requestJsonByMethod(
             'post',
-            'https://www.googleapis.com/calendar/v3/channels/stop',
+            "{$baseUrl}/channels/stop",
             $accessToken,
             [],
             [

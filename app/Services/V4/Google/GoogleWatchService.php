@@ -61,7 +61,7 @@ class GoogleWatchService
             throw new RuntimeException('Active watch channel not found.', 404);
         }
 
-        $this->googleApiService->stopWatchChannel($accessToken, $channel->channel_id, (string) $channel->resource_id);
+        $this->googleApiService->stopWatchChannel($accessToken, (string) $channel->channel_id, (string) $channel->resource_id, (string) $channel->resource_type);
 
         $channel->update([
             'status' => 'stopped',
@@ -230,12 +230,15 @@ class GoogleWatchService
     private function stopWatchSilently(GoogleWatchChannel $channel, string $accessToken): void
     {
         try {
-            $this->googleApiService->stopWatchChannel($accessToken, $channel->channel_id, (string) $channel->resource_id);
+            $this->googleApiService->stopWatchChannel($accessToken, (string) $channel->channel_id, (string) $channel->resource_id, (string) $channel->resource_type);
         } catch (\Throwable $exception) {
-            Log::warning('Google watch stop during renewal failed.', [
-                'channel_id' => $channel->channel_id,
-                'error' => $exception->getMessage(),
-            ]);
+            // If the channel is already gone (404), it's successfully stopped from Google's perspective.
+            if ($exception->getCode() !== 404) {
+                Log::warning('Google watch stop during renewal failed.', [
+                    'channel_id' => $channel->channel_id,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
         } finally {
             $channel->update([
                 'status' => 'stopped',
