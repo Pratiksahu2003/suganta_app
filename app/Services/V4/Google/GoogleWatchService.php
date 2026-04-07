@@ -75,8 +75,8 @@ class GoogleWatchService
             throw new RuntimeException('Only active watch channels can be renewed.', 422);
         }
 
-        $user = $channel->user()->first();
-        if (! $user instanceof User) {
+        $user = User::find($channel->user_id);
+        if (!$user) {
             throw new RuntimeException('Channel user not found for renewal.', 404);
         }
 

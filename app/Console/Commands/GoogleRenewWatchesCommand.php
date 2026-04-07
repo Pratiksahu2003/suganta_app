@@ -40,8 +40,8 @@ class GoogleRenewWatchesCommand extends Command
 
                 try {
                     /** @var User|null $user */
-                    $user = $channel->user()->first();
-                    if (! $user) {
+                    $user = User::find($channel->user_id);
+                    if (!$user) {
                         $failed++;
                         continue;
                     }
@@ -62,7 +62,7 @@ class GoogleRenewWatchesCommand extends Command
             }
         });
 
-        $this->info("Google watch renewal done. total={$total}, renewed={$renewed}, failed={$failed}, dry_run=".($isDryRun ? 'yes' : 'no'));
+        $this->info("Google watch renewal done. total={$total}, renewed={$renewed}, failed={$failed}, dry_run=" . ($isDryRun ? 'yes' : 'no'));
 
         return self::SUCCESS;
     }
