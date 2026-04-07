@@ -13,3 +13,9 @@ Schedule::command('google:watches-renew')
     ->withoutOverlapping()
     ->onOneServer()
     ->name('google-watch-renewal');
+
+Schedule::command('subscription:check-expiry')
+    ->dailyAt('00:00')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->name('subscription-expiry-check');
