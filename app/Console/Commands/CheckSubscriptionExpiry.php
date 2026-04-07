@@ -8,9 +8,20 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Mail;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
+use App\Services\NotificationService;
 
 class CheckSubscriptionExpiry extends Command
 {
+    /**
+     * @var NotificationService
+     */
+    protected $notificationService;
+
+    public function __construct(NotificationService $notificationService)
+    {
+        parent::__construct();
+        $this->notificationService = $notificationService;
+    }
     /**
      * The name and signature of the console command.
      *
@@ -34,12 +45,33 @@ class CheckSubscriptionExpiry extends Command
     {
         $this->info('Starting subscription expiry check...');
 
-        // 1. Mark expired plans
-        $expiredCount = UserSubscription::where('status', 'active')
+        // 1. Mark expired plans and notify
+        $expiredSubscriptions = UserSubscription::where('status', 'active')
             ->where('expires_at', '<', now())
-            ->update(['status' => 'expired']);
+            ->with(['user', 'plan'])
+            ->get();
 
-        $this->info("Marked $expiredCount subscriptions as expired.");
+        foreach ($expiredSubscriptions as $subscription) {
+            $subscription->update(['status' => 'expired']);
+
+            if ($subscription->user) {
+                try {
+                    $this->notificationService->createUserNotification(
+                        $subscription->user_id,
+                        'Subscription Expired',
+                        "Your '{$subscription->plan->name}' subscription has expired. Renew now to maintain access.",
+                        'subscription_expired',
+                        ['plan_name' => $subscription->plan->name ?? 'Premium'],
+                        null, // Add renewal URL if available
+                        'high'
+                    );
+                } catch (\Exception $e) {
+                    Log::error("Failed to send expiry notification to user {$subscription->user_id}: " . $e->getMessage());
+                }
+            }
+        }
+
+        $this->info("Marked " . $expiredSubscriptions->count() . " subscriptions as expired.");
 
         // 2. Send Reminders (7 Days, 3 Days, 1 Day)
         $reminderDays = [7, 3, 1];
@@ -70,19 +102,47 @@ class CheckSubscriptionExpiry extends Command
         $this->info("Found " . $subscriptions->count() . " subscriptions expiring in $days days.");
 
         foreach ($subscriptions as $subscription) {
-            if ($subscription->user && $subscription->user->email) {
+            if ($subscription->user) {
+                // Prepare notification content
+                $planName = $subscription->plan->name ?? 'Premium';
+                $title = "Subscription Expiration Reminder";
+                $message = "Your $planName subscription will expire in $days day(s). Renew now to avoid interruption.";
+
+                // Send Push Notification
                 try {
-                    Mail::to($subscription->user->email)->send(new SubscriptionExpiryReminder(
-                        $subscription->user,
-                        $subscription->expires_at,
-                        $days,
-                        $subscription->plan->name ?? 'Premium'
-                    ));
-                    
-                    $this->line("Sent $days-day reminder to: " . $subscription->user->email);
+                    $this->notificationService->createUserNotification(
+                        $subscription->user_id,
+                        $title,
+                        $message,
+                        'subscription_reminder',
+                        [
+                            'days_left' => $days,
+                            'plan_name' => $planName,
+                            'expires_at' => $subscription->expires_at->toDateTimeString()
+                        ],
+                        null, // renewal URL
+                        'high'
+                    );
+                    $this->line("Sent $days-day push notification to user: " . $subscription->user_id);
                 } catch (\Exception $e) {
-                    Log::error("Failed to send subscription reminder to {$subscription->user->email}: " . $e->getMessage());
-                    $this->error("Failed to send reminder to: " . $subscription->user->email);
+                    Log::error("Failed to send push reminder to user {$subscription->user_id}: " . $e->getMessage());
+                }
+
+                // Send Email
+                if ($subscription->user->email) {
+                    try {
+                        Mail::to($subscription->user->email)->send(new SubscriptionExpiryReminder(
+                            $subscription->user,
+                            $subscription->expires_at,
+                            $days,
+                            $planName
+                        ));
+                        
+                        $this->line("Sent $days-day email reminder to: " . $subscription->user->email);
+                    } catch (\Exception $e) {
+                        Log::error("Failed to send email reminder to {$subscription->user->email}: " . $e->getMessage());
+                        $this->error("Failed to send email reminder to: " . $subscription->user->email);
+                    }
                 }
             }
         }
