@@ -610,27 +610,13 @@ class GoogleSyncController extends Controller
         return response()->json(['message' => 'Webhook received.'], 200);
     }
 
-    public function oauthCallback(Request $request): JsonResponse|Response
+    public function oauthCallback(Request $request): Response
     {
         $error = $request->query('error');
         if (is_string($error) && $error !== '') {
-            $payload = [
-                'message' => 'Google OAuth callback returned an error.',
-                'success' => false,
-                'code' => 400,
-                'errors' => [
-                    'error' => $error,
-                    'error_description' => $request->query('error_description'),
-                ],
-            ];
-
-            if ($request->expectsJson()) {
-                return response()->json($payload, 400);
-            }
-
             return response()->view('google.oauth-callback', [
                 'success' => false,
-                'message' => (string) ($payload['errors']['error_description'] ?: $payload['errors']['error']),
+                'message' => (string) ($request->query('error_description') ?: $error),
                 'backUrl' => $this->oauthCallbackBackUrl(),
             ], 400);
         }
@@ -639,10 +625,6 @@ class GoogleSyncController extends Controller
         $state = (string) $request->query('state', '');
 
         if ($code === '' || $state === '') {
-            if ($request->expectsJson()) {
-                return $this->error('OAuth callback requires both code and state.', 422);
-            }
-
             return response()->view('google.oauth-callback', [
                 'success' => false,
                 'message' => 'OAuth callback requires both code and state.',
@@ -652,22 +634,14 @@ class GoogleSyncController extends Controller
 
         try {
             $user = $this->googleTokenService->consumeOauthStateAndResolveUser($state);
-            $data = $this->googleTokenService->exchangeAuthorizationCode($user, $code);
+            $this->googleTokenService->exchangeAuthorizationCode($user, $code);
         } catch (RuntimeException $exception) {
-            if ($request->expectsJson()) {
-                return $this->error($exception->getMessage(), $exception->getCode() ?: 400);
-            }
-
             return response()->view('google.oauth-callback', [
                 'success' => false,
                 'message' => $exception->getMessage(),
                 'backUrl' => $this->oauthCallbackBackUrl(),
             ], $exception->getCode() ?: 400);
         } catch (Throwable $exception) {
-            if ($request->expectsJson()) {
-                return $this->serverError('Google authorization code exchange failed.', $exception->getMessage());
-            }
-
             return response()->view('google.oauth-callback', [
                 'success' => false,
                 'message' => 'Google authorization code exchange failed.',
@@ -675,19 +649,10 @@ class GoogleSyncController extends Controller
             ], 500);
         }
 
-        if (! $request->expectsJson()) {
-            return response()->view('google.oauth-callback', [
-                'success' => true,
-                'message' => 'Google connected successfully.',
-                'backUrl' => $this->oauthCallbackBackUrl(),
-            ], 200);
-        }
-
-        return response()->json([
-            'message' => 'Google OAuth callback received and exchanged successfully.',
+        return response()->view('google.oauth-callback', [
             'success' => true,
-            'code' => 200,
-            'data' => $data,
+            'message' => 'Google connected successfully.',
+            'backUrl' => $this->oauthCallbackBackUrl(),
         ], 200);
     }
 
@@ -695,6 +660,7 @@ class GoogleSyncController extends Controller
     {
         return (string) config('app.frontend_url', config('app.url', 'https://www.suganta.com'));
     }
+
 
     private function resolveGoogleUrls(): array
     {
