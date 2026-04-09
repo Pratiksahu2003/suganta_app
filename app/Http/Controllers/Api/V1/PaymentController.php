@@ -373,32 +373,39 @@ HTML;
      * Handle Cashfree payment return URL (called after user completes / abandons payment).
      *
      * Cashfree redirects the user's browser here after the hosted checkout flow.
-     * We verify the current order status with Cashfree and return a JSON status
-     * that the frontend / mobile app can use to navigate the user to the right screen.
+     * We verify the current order status with Cashfree and always render a status page.
      *
      * Route: GET /api/v1/payment/callback   (public — no auth)
      */
-    public function callback(Request $request): JsonResponse
+    public function callback(Request $request): \Illuminate\Contracts\View\View
     {
         $orderId = $request->query('order_id');
 
         if (!$orderId) {
-            return $this->error('Missing order_id parameter.', Response::HTTP_BAD_REQUEST);
+            return view('payments.callback-status', $this->buildPaymentStatusViewData(null, [
+                'order_id' => 'N/A',
+                'status' => 'failed',
+            ]));
         }
 
         $payment = Payment::where('order_id', $orderId)->first();
 
         if (!$payment) {
-            return $this->notFound('Payment record not found.');
+            return view('payments.callback-status', $this->buildPaymentStatusViewData(null, [
+                'order_id' => $orderId,
+                'status' => 'failed',
+            ]));
         }
 
         // Already in a terminal state — return immediately (idempotent)
         if (in_array($payment->status, ['success', 'failed', 'cancelled', 'refunded'], true)) {
-            return $this->success('Payment status retrieved.', [
+            $payload = [
                 'order_id'     => $orderId,
                 'status'       => $payment->status,
                 'processed_at' => $payment->processed_at?->toIso8601String(),
-            ]);
+            ];
+
+            return view('payments.callback-status', $this->buildPaymentStatusViewData($payment, $payload));
         }
 
         // Fetch live order status from Cashfree to check whether payment went through
@@ -431,10 +438,12 @@ HTML;
                     $this->registrationPaymentService->handlePaymentSuccess($orderId, $cfPaymentData);
                 }
 
-                return $this->success('Payment successful.', [
+                $payload = [
                     'order_id' => $orderId,
                     'status'   => 'success',
-                ]);
+                ];
+
+                return view('payments.callback-status', $this->buildPaymentStatusViewData($payment, $payload));
             }
 
             if (in_array($orderStatus, ['EXPIRED', 'CANCELLED'], true)) {
@@ -447,10 +456,12 @@ HTML;
                     $this->registrationPaymentService->handlePaymentFailure($orderId, $orderData);
                 }
 
-                return $this->success('Payment could not be completed.', [
+                $payload = [
                     'order_id' => $orderId,
                     'status'   => 'failed',
-                ]);
+                ];
+
+                return view('payments.callback-status', $this->buildPaymentStatusViewData($payment, $payload));
             }
         } catch (\Exception $e) {
             Log::error('Payment callback verification failed', [
@@ -460,10 +471,63 @@ HTML;
         }
 
         // Payment still pending — return current local status
-        return $this->success('Payment is pending.', [
+        $payload = [
             'order_id' => $orderId,
             'status'   => $payment->status,
-        ]);
+        ];
+
+        return view('payments.callback-status', $this->buildPaymentStatusViewData($payment, $payload));
+    }
+
+    /**
+     * Build view data for the payment callback status screen.
+     */
+    private function buildPaymentStatusViewData(?Payment $payment, array $payload): array
+    {
+        $status = strtolower((string) ($payload['status'] ?? 'pending'));
+        $type = $payment?->meta['type'] ?? null;
+
+        $screen = match ($status) {
+            'success' => [
+                'title' => 'Payment Successful',
+                'message' => 'Your payment has been received successfully.',
+                'color' => '#0f9d58',
+                'icon' => 'check',
+            ],
+            'failed', 'cancelled' => [
+                'title' => 'Payment Failed',
+                'message' => 'Your payment could not be completed. Please try again.',
+                'color' => '#d93025',
+                'icon' => 'cross',
+            ],
+            'refunded' => [
+                'title' => 'Payment Refunded',
+                'message' => 'This payment has been refunded.',
+                'color' => '#f59f00',
+                'icon' => 'info',
+            ],
+            default => [
+                'title' => 'Payment Pending',
+                'message' => 'Your payment is being verified. Please check again shortly.',
+                'color' => '#1a73e8',
+                'icon' => 'clock',
+            ],
+        };
+
+        return [
+            'orderId' => $payload['order_id'] ?? ($payment?->order_id ?? 'N/A'),
+            'status' => $status,
+            'type' => $type,
+            'amount' => $payment ? number_format((float) $payment->amount, 2) : '0.00',
+            'currency' => strtoupper((string) ($payment?->currency ?? 'INR')),
+            'processedAt' => $payment?->processed_at?->format('d M Y, h:i A'),
+            'title' => $screen['title'],
+            'message' => $screen['message'],
+            'color' => $screen['color'],
+            'icon' => $screen['icon'],
+            'goBackUrl' => config('cashfree.go_back_url', config('app.frontend_url')),
+            'appName' => config('app.name', 'SuGanta'),
+        ];
     }
 
     /**
