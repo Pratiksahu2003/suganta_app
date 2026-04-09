@@ -202,8 +202,19 @@ class GoogleTokenService
             throw new RuntimeException('Google OAuth client or redirect URI is not configured.', 500);
         }
 
-        $state = Str::random(40);
-        $this->rememberOauthState((int) $user->id, $state);
+        $state = '';
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $candidate = Str::random(40);
+            if ($this->rememberOauthState((int) $user->id, $candidate)) {
+                $state = $candidate;
+                break;
+            }
+        }
+
+        if ($state === '') {
+            throw new RuntimeException('Unable to generate unique OAuth state. Please try again.', 500);
+        }
+
         $scopes = $this->defaultScopes();
 
         $query = http_build_query([
@@ -235,6 +246,32 @@ class GoogleTokenService
         if (! Cache::pull($cacheKey)) {
             throw new RuntimeException('OAuth state is invalid or expired. Please restart OAuth flow.', 422);
         }
+
+        Cache::forget($this->oauthStateLookupCacheKey($state));
+    }
+
+    public function consumeOauthStateAndResolveUser(?string $state): User
+    {
+        if (! is_string($state) || trim($state) === '') {
+            throw new RuntimeException('OAuth state is required.', 422);
+        }
+
+        $userId = (int) Cache::pull($this->oauthStateLookupCacheKey($state));
+        if ($userId <= 0) {
+            throw new RuntimeException('OAuth state is invalid or expired. Please restart OAuth flow.', 422);
+        }
+
+        $cacheKey = $this->oauthStateCacheKey($userId, $state);
+        if (! Cache::pull($cacheKey)) {
+            throw new RuntimeException('OAuth state is invalid or expired. Please restart OAuth flow.', 422);
+        }
+
+        $user = User::query()->find($userId);
+        if (! $user instanceof User) {
+            throw new RuntimeException('Unable to resolve user for OAuth state.', 404);
+        }
+
+        return $user;
     }
 
     public function status(User $user): array
@@ -296,15 +333,34 @@ class GoogleTokenService
         return base_path($path);
     }
 
-    private function rememberOauthState(int $userId, string $state): void
+    private function rememberOauthState(int $userId, string $state): bool
     {
         $ttl = max(60, (int) config('services.google.oauth_state_ttl_seconds', 600));
-        Cache::put($this->oauthStateCacheKey($userId, $state), true, now()->addSeconds($ttl));
+        $expiresAt = now()->addSeconds($ttl);
+
+        $lookupKey = $this->oauthStateLookupCacheKey($state);
+        if (! Cache::add($lookupKey, $userId, $expiresAt)) {
+            return false;
+        }
+
+        $userStateKey = $this->oauthStateCacheKey($userId, $state);
+        if (! Cache::add($userStateKey, true, $expiresAt)) {
+            Cache::forget($lookupKey);
+
+            return false;
+        }
+
+        return true;
     }
 
     private function oauthStateCacheKey(int $userId, string $state): string
     {
         return 'google:oauth:state:'.$userId.':'.$state;
+    }
+
+    private function oauthStateLookupCacheKey(string $state): string
+    {
+        return 'google:oauth:state:lookup:'.$state;
     }
 
     /**

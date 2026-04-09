@@ -20,6 +20,7 @@ use App\Services\V4\Google\GoogleWatchService;
 use App\Traits\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Auth;
 use RuntimeException;
 use Throwable;
@@ -609,11 +610,11 @@ class GoogleSyncController extends Controller
         return response()->json(['message' => 'Webhook received.'], 200);
     }
 
-    public function oauthCallback(Request $request): JsonResponse
+    public function oauthCallback(Request $request): JsonResponse|Response
     {
         $error = $request->query('error');
         if (is_string($error) && $error !== '') {
-            return response()->json([
+            $payload = [
                 'message' => 'Google OAuth callback returned an error.',
                 'success' => false,
                 'code' => 400,
@@ -621,20 +622,78 @@ class GoogleSyncController extends Controller
                     'error' => $error,
                     'error_description' => $request->query('error_description'),
                 ],
+            ];
+
+            if ($request->expectsJson()) {
+                return response()->json($payload, 400);
+            }
+
+            return response()->view('google.oauth-callback', [
+                'success' => false,
+                'message' => (string) ($payload['errors']['error_description'] ?: $payload['errors']['error']),
+                'backUrl' => $this->oauthCallbackBackUrl(),
             ], 400);
         }
 
+        $code = (string) $request->query('code', '');
+        $state = (string) $request->query('state', '');
+
+        if ($code === '' || $state === '') {
+            if ($request->expectsJson()) {
+                return $this->error('OAuth callback requires both code and state.', 422);
+            }
+
+            return response()->view('google.oauth-callback', [
+                'success' => false,
+                'message' => 'OAuth callback requires both code and state.',
+                'backUrl' => $this->oauthCallbackBackUrl(),
+            ], 422);
+        }
+
+        try {
+            $user = $this->googleTokenService->consumeOauthStateAndResolveUser($state);
+            $data = $this->googleTokenService->exchangeAuthorizationCode($user, $code);
+        } catch (RuntimeException $exception) {
+            if ($request->expectsJson()) {
+                return $this->error($exception->getMessage(), $exception->getCode() ?: 400);
+            }
+
+            return response()->view('google.oauth-callback', [
+                'success' => false,
+                'message' => $exception->getMessage(),
+                'backUrl' => $this->oauthCallbackBackUrl(),
+            ], $exception->getCode() ?: 400);
+        } catch (Throwable $exception) {
+            if ($request->expectsJson()) {
+                return $this->serverError('Google authorization code exchange failed.', $exception->getMessage());
+            }
+
+            return response()->view('google.oauth-callback', [
+                'success' => false,
+                'message' => 'Google authorization code exchange failed.',
+                'backUrl' => $this->oauthCallbackBackUrl(),
+            ], 500);
+        }
+
+        if (! $request->expectsJson()) {
+            return response()->view('google.oauth-callback', [
+                'success' => true,
+                'message' => 'Google connected successfully.',
+                'backUrl' => $this->oauthCallbackBackUrl(),
+            ], 200);
+        }
+
         return response()->json([
-            'message' => 'Google OAuth callback received successfully.',
+            'message' => 'Google OAuth callback received and exchanged successfully.',
             'success' => true,
             'code' => 200,
-            'data' => [
-                'code' => $request->query('code'),
-                'state' => $request->query('state'),
-                'scope' => $request->query('scope'),
-                'hint' => 'Send code + state to POST /api/v4/google/oauth/exchange-code with sanctum auth.',
-            ],
+            'data' => $data,
         ], 200);
+    }
+
+    private function oauthCallbackBackUrl(): string
+    {
+        return (string) config('app.frontend_url', config('app.url', 'https://www.suganta.com'));
     }
 
     private function resolveGoogleUrls(): array
