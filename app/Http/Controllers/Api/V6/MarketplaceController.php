@@ -131,7 +131,8 @@ class MarketplaceController extends Controller
     public function download(Request $request, $id)
     {
         $token = $request->query('token');
-        $order = $this->service->validateDownloadToken($token);
+        $order = $this->service->validateDownloadToken($id);
+
 
         if (!$order || $order->listing_id != $id || $order->user_id !== auth()->id()) {
             return $this->forbidden('Invalid or expired access.');
@@ -313,9 +314,7 @@ class MarketplaceController extends Controller
             'price' => $listing->price,
             'category' => $listing->category,
             'type' => $listing->type,
-
-            'file_path' => storage_file_url($listing->file_path),
-
+            'file_path' => (auth()->check() && $listing->isPurchasedBy(auth()->id())) ? storage_file_url($listing->file_path) : null,
             'thumbnail' => storage_file_url($listing->thumbnail),
 
             'images' => collect($listing->images ?? [])

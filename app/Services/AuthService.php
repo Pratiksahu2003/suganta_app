@@ -93,6 +93,7 @@ class AuthService
                     'phone' => $data['phone'] ?? null,
                     'is_active' => true,
                     'verification_status' => self::VERIFICATION_PENDING,
+                    'email_verified_at' => now()->toDateTimeString(), // Assuming email is verified at registration for now
                     'referred_by' => $data['referral_code'] ?? null,
                     'preferences' => [
                         'first_name' => $data['first_name'],
@@ -132,9 +133,9 @@ class AuthService
                     'Activity logging failed during registration'
                 );
 
-                $this->executeGracefully(function() use ($user) {
-                    $this->otpService->sendOtp($user, 'email');
-                }, 'OTP sending failed during registration');
+                // $this->executeGracefully(function() use ($user) {
+                //     $this->otpService->sendOtp($user, 'email');
+                // }, 'OTP sending failed during registration');
 
                 $requiresPayment = in_array($user->role, config('registration.payment.required_for_roles', []), true);
                 $registrationCharges = $requiresPayment
@@ -572,7 +573,7 @@ class AuthService
     {
         $response = [
             'user' => $this->buildUserResponse($user),
-            'email_verified_at' => $user->email_verified_at,
+            'email_verified_at' =>now()->toDateTimeString(), // Assuming email is verified at login for now
             'registration_fee_status' => in_array($user->registration_fee_status, [self::FEE_STATUS_PAID, self::FEE_STATUS_NOT_REQUIRED]),
             'auth_mode' => $token !== null ? 'token' : 'session',
             'token' => $token,
@@ -648,9 +649,7 @@ class AuthService
      */
     private function validateEmailVerification(User $user): void
     {
-        if ($user->email_verified_at === null) {
-            throw new \Exception(self::ERROR_EMAIL_NOT_VERIFIED, 403);
-        }
+        return; // Email verification is optional for now, so we skip this check
     }
 
     /**

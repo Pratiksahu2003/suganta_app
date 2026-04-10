@@ -140,16 +140,9 @@ class MarketplaceService
     /**
      * Validate download token and return order
      */
-    public function validateDownloadToken(string $token)
+    public function validateDownloadToken(string $id)
     {
-        $key = 'marketplace:download:' . $token;
-        $orderId = Redis::get($key);
-
-        if (!$orderId) {
-            return null;
-        }
-
-        return MarketplaceOrder::with('listing')->find($orderId);
+        return MarketplaceOrder::with('listing')->where('listing_id', $id)->where('user_id', auth()->id())->first();
     }
 
     /**

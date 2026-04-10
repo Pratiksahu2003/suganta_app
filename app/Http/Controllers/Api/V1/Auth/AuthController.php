@@ -142,7 +142,7 @@ class AuthController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return $this->validationError($validator->errors(), 'Verification failed');
+            return $this->validationError($validator->errors(), 'Verification failed due to invalid input');
         }
 
         try {
@@ -159,9 +159,9 @@ class AuthController extends Controller
 
             return $this->success('Login successful', $result);
         } catch (\Illuminate\Validation\ValidationException $e) {
-            return $this->validationError($e->errors(), 'Verification failed');
+            return $this->validationError($e->errors(), 'Verification failed due to invalid input');
         } catch (\Exception $e) {
-            Log::error('API Login Verification failed: ' . $e->getMessage());
+            Log::error('API Login Verification failed due to invalid input: ' . $e->getMessage());
 
             $statusCode = $e->getCode();
             if ($statusCode < 100 || $statusCode > 599) {
