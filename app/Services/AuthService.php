@@ -105,11 +105,9 @@ class AuthService
                 $this->assignUserRole($user, $data['role']);
 
                 $deviceName = $data['device_name'] ?? ($request->userAgent() ?? self::DEFAULT_DEVICE_NAME);
-                $token = null;
+                $token = $user->createToken($deviceName)->plainTextToken;
                 if ($this->isStatefulSPARequest($request)) {
                     $this->loginWebSession($user, $request);
-                } else {
-                    $token = $user->createToken($deviceName)->plainTextToken;
                 }
 
                 // Create Profile
@@ -142,7 +140,7 @@ class AuthService
                     ? config("registration.charges.{$user->role}")
                     : null;
 
-                return $this->buildRegistrationResponse($user, $token, $requiresPayment, $registrationCharges);
+                return $this->buildRegistrationResponse($user, $token, $requiresPayment, $registrationCharges, $request);
             } catch (\Exception $e) {
                 $this->handleAuthError($e, 'Registration', [
                     'email' => $data['email'] ?? 'unknown'
@@ -273,11 +271,9 @@ class AuthService
 
         // Complete OTP-based login
         $deviceName = $data['device_name'] ?? $request->ip();
-        $token = null;
+        $token = $user->createToken($deviceName)->plainTextToken;
         if ($this->isStatefulSPARequest($request)) {
             $this->loginWebSession($user, $request);
-        } else {
-            $token = $user->createToken($deviceName)->plainTextToken;
         }
 
         $this->sessionService->createSession($user, $request);
@@ -300,7 +296,7 @@ class AuthService
             'message' => 'Login successful',
         ];
 
-        $response = array_merge($response, $this->buildLoginResponse($user, $token, $deviceToken));
+        $response = array_merge($response, $this->buildLoginResponse($user, $token, $request, $deviceToken));
 
         return $response;
     }
@@ -569,19 +565,16 @@ class AuthService
     /**
      * Build successful login response
      */
-    private function buildLoginResponse(User $user, ?string $token, ?string $deviceToken = null): array
+    private function buildLoginResponse(User $user, string $token, Request $request, ?string $deviceToken = null): array
     {
         $response = [
             'user' => $this->buildUserResponse($user),
-            'email_verified_at' =>now()->toDateTimeString(), // Assuming email is verified at login for now
+            'email_verified_at' => $user->email_verified_at,
             'registration_fee_status' => in_array($user->registration_fee_status, [self::FEE_STATUS_PAID, self::FEE_STATUS_NOT_REQUIRED]),
-            'auth_mode' => $token !== null ? 'token' : 'session',
+            'auth_mode' => $this->isStatefulSPARequest($request) ? 'both' : 'token',
             'token' => $token,
+            'token_type' => self::TOKEN_TYPE,
         ];
-
-        if ($token !== null) {
-            $response['token_type'] = self::TOKEN_TYPE;
-        }
 
         if ($deviceToken) {
             $response['device_token'] = $deviceToken;
@@ -593,22 +586,17 @@ class AuthService
     /**
      * Build registration response
      */
-    private function buildRegistrationResponse(User $user, ?string $token, bool $requiresPayment, ?array $registrationCharges): array
+    private function buildRegistrationResponse(User $user, string $token, bool $requiresPayment, ?array $registrationCharges, Request $request): array
     {
-        $payload = [
+        return [
             'user' => $user->only(['id', 'name', 'email', 'role', 'email_verified_at', 'phone_verified_at', 'registration_fee_status']),
-            'auth_mode' => $token !== null ? 'token' : 'session',
+            'auth_mode' => $this->isStatefulSPARequest($request) ? 'both' : 'token',
             'token' => $token,
+            'token_type' => self::TOKEN_TYPE,
             'next_step' => 'email_verification',
             'requires_registration_payment' => $requiresPayment,
             'registration_charges' => $registrationCharges,
         ];
-
-        if ($token !== null) {
-            $payload['token_type'] = self::TOKEN_TYPE;
-        }
-
-        return $payload;
     }
 
     /**
@@ -704,11 +692,9 @@ class AuthService
     private function completeTrustedLogin(User $user, array $credentials, Request $request): array
     {
         $deviceName = $credentials['device_name'] ?? $request->ip();
-        $token = null;
+        $token = $user->createToken($deviceName)->plainTextToken;
         if ($this->isStatefulSPARequest($request)) {
             $this->loginWebSession($user, $request);
-        } else {
-            $token = $user->createToken($deviceName)->plainTextToken;
         }
 
         $this->sessionService->createSession($user, $request);
@@ -720,7 +706,7 @@ class AuthService
             'device_name' => $deviceName
         ]);
 
-        return $this->buildLoginResponse($user, $token);
+        return $this->buildLoginResponse($user, $token, $request);
     }
 
     /**

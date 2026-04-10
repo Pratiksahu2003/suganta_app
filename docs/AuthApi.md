@@ -29,9 +29,15 @@ Error responses set `success: false`. Validation errors (HTTP **422**) put Larav
 | `Accept` | Recommended | `application/json` |
 | `Content-Type` | For JSON bodies | `application/json` |
 
-**Web SPA (e.g. `app.suganta.com` → `api.suganta.com`):** Configure `SANCTUM_STATEFUL_DOMAINS`, `SESSION_DOMAIN` (e.g. `.suganta.com`), and `CORS_ALLOWED_ORIGINS` with credentials (see `.env.example`). Call `GET {API_URL}/sanctum/csrf-cookie` with `credentials: 'include'`, then send mutating requests with the `X-XSRF-TOKEN` header and cookies. Successful `register` / `login` / `login/verify` responses use **`auth_mode`: `session`** and **`token`: `null`**; `auth:sanctum` then accepts the session cookie.
+**Web SPA (e.g. `app.suganta.com` → `api.suganta.com`):** Configure `SANCTUM_STATEFUL_DOMAINS`, `SESSION_DOMAIN` (e.g. `.suganta.com`), and `CORS_ALLOWED_ORIGINS` with credentials (see `.env.example`). After `register` / `login` / `login/verify`, responses use **`auth_mode`: `both`**: you get a **session cookie** (for cookie-based requests) **and** a **`token`** (same as mobile). Prefer sending **`Authorization: Bearer {token}`** on API calls from the browser to avoid CSRF setup; you can still use cookies + `X-XSRF-TOKEN` if you call `GET {API_URL}/sanctum/csrf-cookie` first.
 
-**Mobile / Postman:** No matching `Origin` → **`auth_mode`: `token`** and a **`token`** string; send `Authorization: Bearer` on later requests.
+**Mobile / Postman:** No matching `Origin` → **`auth_mode`: `token`**; send `Authorization: Bearer` on later requests.
+
+### CSRF token mismatch (HTTP 419)
+
+- **Public auth** (`register`, `login`, `login/send-otp`, `login/verify`, `forgot-password`, `reset-password`): excluded from CSRF in `App\Http\Middleware\ValidateCsrfToken` so the first request works without `sanctum/csrf-cookie`.
+- **All other API routes:** Either send **`Authorization: Bearer {token}`** (skips CSRF when `csrf_skip_with_bearer` is true in `config/sanctum.php`) or use **`GET {API_URL}/sanctum/csrf-cookie`** + **`X-XSRF-TOKEN`** on mutating requests with `credentials: 'include'`.
+- **Cookies:** Set `SESSION_DOMAIN` to the parent domain (e.g. `.suganta.com`) and list the SPA in `CORS_ALLOWED_ORIGINS` with credentials enabled.
 
 **Login (optional):** `X-Device-Token` — if set and recognized for the user, the device is treated as trusted and password login can complete without the OTP step. Otherwise the API returns **`requires_otp`** and you must use `login/send-otp` and `login/verify`.
 

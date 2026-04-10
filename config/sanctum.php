@@ -66,6 +66,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | CSRF: Bearer bypass
+    |--------------------------------------------------------------------------
+    |
+    | When true, stateful API requests that send a non-empty Bearer token skip
+    | CSRF verification (mobile, Postman, hybrid SPAs). Cookie-only SPAs must
+    | still use /sanctum/csrf-cookie and X-XSRF-TOKEN.
+    |
+    */
+
+    'csrf_skip_with_bearer' => env('SANCTUM_CSRF_SKIP_WITH_BEARER', true),
+
+    /*
+    |--------------------------------------------------------------------------
     | Sanctum Middleware
     |--------------------------------------------------------------------------
     |
@@ -78,7 +91,7 @@ return [
     'middleware' => [
         'authenticate_session' => Laravel\Sanctum\Http\Middleware\AuthenticateSession::class,
         'encrypt_cookies' => Illuminate\Cookie\Middleware\EncryptCookies::class,
-        'validate_csrf_token' => Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class,
+        'validate_csrf_token' => App\Http\Middleware\ValidateCsrfToken::class,
     ],
 
 ];
