@@ -8,9 +8,7 @@ use Illuminate\Http\Request;
 class ValidateCsrfToken extends Middleware
 {
     /**
-     * Public JSON auth endpoints: browsers often POST here before any session/XSRF cookie exists.
-     * Authenticated routes and the rest of the API still require CSRF for cookie-only requests,
-     * unless a Bearer token is present (see tokensMatch).
+     * Fallback when SANCTUM_CSRF_EXEMPT_API=false: public auth may run before any session exists.
      *
      * @var array<int, string>
      */
@@ -23,13 +21,33 @@ class ValidateCsrfToken extends Middleware
     ];
 
     /**
-     * SPA / browser cookie auth must still send X-XSRF-TOKEN (after GET /sanctum/csrf-cookie).
-     * Requests that authenticate with a Bearer token do not need CSRF protection; skipping here
-     * fixes 419 for mobile, Postman, and WebViews that send a first-party Origin but no CSRF header.
+     * Allow all JSON API routes to skip CSRF so both session cookies and Bearer tokens work.
+     * When disabled in config, only paths in $except (and Bearer bypass) apply.
+     */
+    protected function inExceptArray($request): bool
+    {
+        if (filter_var(config('sanctum.csrf_exempt_api', true), FILTER_VALIDATE_BOOLEAN)
+            && $request instanceof Request
+            && $this->isApiPath($request)) {
+            return true;
+        }
+
+        return parent::inExceptArray($request);
+    }
+
+    protected function isApiPath(Request $request): bool
+    {
+        $path = $request->path();
+
+        return $path === 'api' || str_starts_with($path, 'api/');
+    }
+
+    /**
+     * Extra bypass when CSRF is not exempt and the client sends a Bearer token.
      */
     protected function tokensMatch($request): bool
     {
-        if ($this->usesBearerAuthentication($request)) {
+        if ($request instanceof Request && $this->usesBearerAuthentication($request)) {
             return true;
         }
 

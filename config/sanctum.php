@@ -79,6 +79,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | CSRF: exempt JSON API (session + token)
+    |--------------------------------------------------------------------------
+    |
+    | When true, routes under /api/* skip CSRF verification so cookie-based
+    | Sanctum sessions work without X-XSRF-TOKEN on every request. Bearer
+    | tokens continue to work as usual. auth:sanctum resolves the user from
+    | the web session first, then the personal access token.
+    |
+    | Set to false if you prefer strict CSRF and will send X-XSRF-TOKEN from
+    | the SPA (Bearer bypass via csrf_skip_with_bearer still applies).
+    |
+    */
+
+    'csrf_exempt_api' => env('SANCTUM_CSRF_EXEMPT_API', true),
+
+    /*
+    |--------------------------------------------------------------------------
     | Sanctum Middleware
     |--------------------------------------------------------------------------
     |
