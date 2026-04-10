@@ -16,6 +16,8 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         // Run in global stack so we read php://input BEFORE any other code (Symfony, etc.)
         $middleware->prepend(\App\Http\Middleware\PreserveRawBodyForWebhook::class);
+        // Sanctum: session + CSRF for first-party SPA (Origin/Referer in SANCTUM_STATEFUL_DOMAINS); Bearer tokens for other clients
+        $middleware->statefulApi();
         $middleware->prependToGroup('api', \App\Http\Middleware\ForceJsonApi::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

@@ -210,11 +210,18 @@ class AuthController extends Controller
     public function refreshToken(Request $request): JsonResponse
     {
         try {
-            $token = $this->authService->refreshToken($request->user());
+            $result = $this->authService->refreshToken($request->user());
 
-            return $this->success('Token refreshed successfully', [
-                'token' => $token,
-                'token_type' => 'Bearer'
+            if (($result['type'] ?? '') === 'bearer') {
+                return $this->success('Token refreshed successfully', [
+                    'auth_mode' => 'token',
+                    'token' => $result['token'],
+                    'token_type' => $result['token_type'],
+                ]);
+            }
+
+            return $this->success('Session refreshed successfully', [
+                'auth_mode' => 'session',
             ]);
         } catch (\Exception $e) {
             return $this->serverError('Token refresh failed', $e);

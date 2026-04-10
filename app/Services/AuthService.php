@@ -13,6 +13,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Validation\ValidationException;
+use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class AuthService
 {
@@ -101,9 +103,13 @@ class AuthService
                 // Assign role
                 $this->assignUserRole($user, $data['role']);
 
-                // Create token
                 $deviceName = $data['device_name'] ?? ($request->userAgent() ?? self::DEFAULT_DEVICE_NAME);
-                $token = $user->createToken($deviceName)->plainTextToken;
+                $token = null;
+                if ($this->isStatefulSPARequest($request)) {
+                    $this->loginWebSession($user, $request);
+                } else {
+                    $token = $user->createToken($deviceName)->plainTextToken;
+                }
 
                 // Create Profile
                 Profile::create([
@@ -266,7 +272,12 @@ class AuthService
 
         // Complete OTP-based login
         $deviceName = $data['device_name'] ?? $request->ip();
-        $token = $user->createToken($deviceName)->plainTextToken;
+        $token = null;
+        if ($this->isStatefulSPARequest($request)) {
+            $this->loginWebSession($user, $request);
+        } else {
+            $token = $user->createToken($deviceName)->plainTextToken;
+        }
 
         $this->sessionService->createSession($user, $request);
         $this->checkUnusualLoginLocation($user);
@@ -308,7 +319,20 @@ class AuthService
                 $this->sessionService->deactivateSession($currentSession);
             }
 
-            $user->currentAccessToken()->delete();
+            $accessToken = $user->currentAccessToken();
+            if ($accessToken instanceof PersonalAccessToken) {
+                $accessToken->delete();
+            }
+
+            $web = Auth::guard('web');
+            if ($web->check() && (int) $web->id() === (int) $user->id) {
+                $web->logout();
+                if (request()->hasSession()) {
+                    request()->session()->invalidate();
+                    request()->session()->regenerateToken();
+                }
+            }
+
             $this->userActivityService->logout($user);
         } catch (\Exception $e) {
             $this->handleAuthError($e, 'Logout');
@@ -328,6 +352,15 @@ class AuthService
         try {
             $this->sessionService->deactivateUserSessions($user);
             $user->tokens()->delete();
+
+            $web = Auth::guard('web');
+            if ($web->check() && (int) $web->id() === (int) $user->id) {
+                $web->logout();
+                if (request()->hasSession()) {
+                    request()->session()->invalidate();
+                    request()->session()->regenerateToken();
+                }
+            }
         } catch (\Exception $e) {
             $this->handleAuthError($e, 'LogoutAll');
             throw $e;
@@ -335,17 +368,33 @@ class AuthService
     }
 
     /**
-     * Generate new authentication token for user
-     * 
-     * @param User $user Authenticated user requesting token refresh
-     * @return string New authentication token
-     * @throws \Exception When token refresh fails
+     * Rotate bearer token or regenerate web session (SPA cookie auth).
+     *
+     * @return array{type: 'bearer', token: string, token_type: string}|array{type: 'session'}
      */
-    public function refreshToken(User $user): string
+    public function refreshToken(User $user): array
     {
         try {
-            $user->currentAccessToken()->delete();
-            return $user->createToken('auth-token')->plainTextToken;
+            $accessToken = $user->currentAccessToken();
+            if ($accessToken instanceof PersonalAccessToken) {
+                $accessToken->delete();
+                $plain = $user->createToken('auth-token')->plainTextToken;
+
+                return [
+                    'type' => 'bearer',
+                    'token' => $plain,
+                    'token_type' => self::TOKEN_TYPE,
+                ];
+            }
+
+            $web = Auth::guard('web');
+            if (request()->hasSession() && $web->check() && (int) $web->id() === (int) $user->id) {
+                request()->session()->regenerate();
+
+                return ['type' => 'session'];
+            }
+
+            throw new \RuntimeException('No refreshable credential');
         } catch (\Exception $e) {
             $this->handleAuthError($e, 'RefreshToken');
             throw $e;
@@ -519,15 +568,19 @@ class AuthService
     /**
      * Build successful login response
      */
-    private function buildLoginResponse(User $user, string $token, ?string $deviceToken = null): array
+    private function buildLoginResponse(User $user, ?string $token, ?string $deviceToken = null): array
     {
         $response = [
             'user' => $this->buildUserResponse($user),
             'email_verified_at' => $user->email_verified_at,
             'registration_fee_status' => in_array($user->registration_fee_status, [self::FEE_STATUS_PAID, self::FEE_STATUS_NOT_REQUIRED]),
+            'auth_mode' => $token !== null ? 'token' : 'session',
             'token' => $token,
-            'token_type' => self::TOKEN_TYPE,
         ];
+
+        if ($token !== null) {
+            $response['token_type'] = self::TOKEN_TYPE;
+        }
 
         if ($deviceToken) {
             $response['device_token'] = $deviceToken;
@@ -539,16 +592,22 @@ class AuthService
     /**
      * Build registration response
      */
-    private function buildRegistrationResponse(User $user, string $token, bool $requiresPayment, ?array $registrationCharges): array
+    private function buildRegistrationResponse(User $user, ?string $token, bool $requiresPayment, ?array $registrationCharges): array
     {
-        return [
+        $payload = [
             'user' => $user->only(['id', 'name', 'email', 'role', 'email_verified_at', 'phone_verified_at', 'registration_fee_status']),
+            'auth_mode' => $token !== null ? 'token' : 'session',
             'token' => $token,
-            'token_type' => self::TOKEN_TYPE,
             'next_step' => 'email_verification',
             'requires_registration_payment' => $requiresPayment,
             'registration_charges' => $registrationCharges,
         ];
+
+        if ($token !== null) {
+            $payload['token_type'] = self::TOKEN_TYPE;
+        }
+
+        return $payload;
     }
 
     /**
@@ -646,7 +705,12 @@ class AuthService
     private function completeTrustedLogin(User $user, array $credentials, Request $request): array
     {
         $deviceName = $credentials['device_name'] ?? $request->ip();
-        $token = $user->createToken($deviceName)->plainTextToken;
+        $token = null;
+        if ($this->isStatefulSPARequest($request)) {
+            $this->loginWebSession($user, $request);
+        } else {
+            $token = $user->createToken($deviceName)->plainTextToken;
+        }
 
         $this->sessionService->createSession($user, $request);
         $this->checkUnusualLoginLocation($user);
@@ -658,6 +722,24 @@ class AuthService
         ]);
 
         return $this->buildLoginResponse($user, $token);
+    }
+
+    /**
+     * First-party browser SPA (Sanctum): Origin/Referer must match config('sanctum.stateful').
+     * Mobile/native and tools without Origin continue to use personal access tokens.
+     */
+    private function isStatefulSPARequest(Request $request): bool
+    {
+        return EnsureFrontendRequestsAreStateful::fromFrontend($request);
+    }
+
+    /**
+     * Cookie session for SPA; works with auth:sanctum via config('sanctum.guard') => web.
+     */
+    private function loginWebSession(User $user, Request $request): void
+    {
+        Auth::guard('web')->login($user, false);
+        $request->session()->regenerate();
     }
 
     /**
