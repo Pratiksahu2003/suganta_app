@@ -27,12 +27,13 @@ class AuthController extends Controller
     }
 
     /**
-     * SPA / client: check if the current request is authenticated (session cookie or Bearer token).
-     * Does not return 401 when logged out — use `authenticated` in the payload.
+     * SPA session check: reads the web guard (session cookie). Route uses `web` middleware so
+     * the session is loaded even when Sanctum’s stateful Origin/Referer check does not run.
+     * Bearer tokens are ignored — use cookie auth only on this endpoint.
      */
     public function me(Request $request): JsonResponse
     {
-        $user = Auth::guard('sanctum')->user();
+        $user = Auth::guard('web')->user();
 
         if (! $user) {
             return $this->success('Not authenticated', [
@@ -41,11 +42,9 @@ class AuthController extends Controller
             ]);
         }
 
-        $authMode = $request->bearerToken() ? 'token' : 'session';
-
         return $this->success('Authenticated', [
             'authenticated' => true,
-            'auth_mode' => $authMode,
+            'auth_mode' => 'session',
             'user' => [
                 'id' => $user->id,
                 'name' => $user->name,

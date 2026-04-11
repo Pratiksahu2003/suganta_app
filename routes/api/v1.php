@@ -25,7 +25,8 @@ Route::prefix(config('api.version', 'v1'))->group(function (): void {
     Route::prefix('auth')->group(function () {
         // Public Auth Routes (AuthController)
         Route::controller(AuthController::class)->group(function () {
-            Route::get('user', 'me');
+            // Sanctum skips its stateful stack (missing Origin/Referer). See AuthController::me.
+            Route::middleware('web')->get('user', 'me');
             Route::post('register', 'register');
             Route::post('login', 'login');
             Route::post('login/send-otp', 'sendLoginOtp');

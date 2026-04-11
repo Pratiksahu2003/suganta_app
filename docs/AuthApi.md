@@ -48,7 +48,7 @@ Protected routes use **`auth:sanctum`**, which accepts **either** the **web sess
 
 **`GET /auth/user`** · Public (no `401` when logged out)
 
-Send **`credentials: 'include'`** for session auth, and/or **`Authorization: Bearer`** for token auth. Resolves the user the same way as `auth:sanctum`.
+**Cookie / SPA:** this route uses the **`web` middleware** so the **session cookie is always decrypted and loaded** (even when Sanctum does not treat the request as stateful because `Origin` / `Referer` is missing). The user is read from the **`web` guard** only — **`Authorization: Bearer` is ignored**. Always send **`credentials: 'include'`** from the browser.
 
 ### Success — logged out — `200 OK`
 
@@ -89,7 +89,7 @@ Send **`credentials: 'include'`** for session auth, and/or **`Authorization: Bea
 }
 ```
 
-`auth_mode` is `token` when a Bearer token is present on the request, otherwise `session` when authenticated via cookie.
+`auth_mode` is always **`session`** when `authenticated` is true (cookie session only).
 
 ---
 
@@ -584,7 +584,7 @@ If any provided OTP is wrong, message combines results; `user` may still be incl
 
 | Method | Path | Auth |
 |--------|------|------|
-| `GET` | `/auth/user` | Public (session and/or Bearer optional) |
+| `GET` | `/auth/user` | Session cookie check (`web` + cookie; no Bearer) |
 | `POST` | `/auth/register` | Public |
 | `POST` | `/auth/login` | Public |
 | `POST` | `/auth/login/send-otp` | Public |
