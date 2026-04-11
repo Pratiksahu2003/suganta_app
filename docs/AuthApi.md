@@ -44,6 +44,55 @@ Protected routes use **`auth:sanctum`**, which accepts **either** the **web sess
 
 ---
 
+## SPA: Current user (login check)
+
+**`GET /auth/user`** · Public (no `401` when logged out)
+
+Send **`credentials: 'include'`** for session auth, and/or **`Authorization: Bearer`** for token auth. Resolves the user the same way as `auth:sanctum`.
+
+### Success — logged out — `200 OK`
+
+```json
+{
+  "success": true,
+  "message": "Not authenticated",
+  "code": 200,
+  "data": {
+    "authenticated": false,
+    "user": null
+  }
+}
+```
+
+### Success — logged in — `200 OK`
+
+```json
+{
+  "success": true,
+  "message": "Authenticated",
+  "code": 200,
+  "data": {
+    "authenticated": true,
+    "auth_mode": "session",
+    "user": {
+      "id": 1,
+      "name": "John Doe",
+      "email": "john@example.com",
+      "role": "student",
+      "phone": null,
+      "email_verified_at": "2025-01-15T10:00:00.000000Z",
+      "phone_verified_at": null,
+      "registration_fee_status": "not_required",
+      "verification_status": "verified"
+    }
+  }
+}
+```
+
+`auth_mode` is `token` when a Bearer token is present on the request, otherwise `session` when authenticated via cookie.
+
+---
+
 ## 1. Register
 
 **`POST /auth/register`** · Public
@@ -535,6 +584,7 @@ If any provided OTP is wrong, message combines results; `user` may still be incl
 
 | Method | Path | Auth |
 |--------|------|------|
+| `GET` | `/auth/user` | Public (session and/or Bearer optional) |
 | `POST` | `/auth/register` | Public |
 | `POST` | `/auth/login` | Public |
 | `POST` | `/auth/login/send-otp` | Public |

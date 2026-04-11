@@ -11,6 +11,7 @@ use App\Services\AuthService;
 use App\Traits\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 
@@ -23,6 +24,40 @@ class AuthController extends Controller
     public function __construct(AuthService $authService)
     {
         $this->authService = $authService;
+    }
+
+    /**
+     * SPA / client: check if the current request is authenticated (session cookie or Bearer token).
+     * Does not return 401 when logged out — use `authenticated` in the payload.
+     */
+    public function me(Request $request): JsonResponse
+    {
+        $user = Auth::guard('sanctum')->user();
+
+        if (! $user) {
+            return $this->success('Not authenticated', [
+                'authenticated' => false,
+                'user' => null,
+            ]);
+        }
+
+        $authMode = $request->bearerToken() ? 'token' : 'session';
+
+        return $this->success('Authenticated', [
+            'authenticated' => true,
+            'auth_mode' => $authMode,
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $user->role,
+                'phone' => $user->phone,
+                'email_verified_at' => $user->email_verified_at,
+                'phone_verified_at' => $user->phone_verified_at,
+                'registration_fee_status' => $user->registration_fee_status,
+                'verification_status' => $user->verification_status,
+            ],
+        ]);
     }
 
     /**
