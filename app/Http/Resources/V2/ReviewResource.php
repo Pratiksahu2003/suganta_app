@@ -29,11 +29,11 @@ class ReviewResource extends JsonResource
             'reviewer' => $this->whenLoaded('user', fn () => [
                 'id' => $this->user->id,
                 'name' => $this->user->name,
-                'avatar' => $this->user->avatar_url ?? null,
+                'role' => $this->user->role ?? null,
             ]),
 
             'reviewable' => [
-                'type' => $this->reviewable_type_name,
+                'type' => $this->whenLoaded('reviewable', fn () => $this->reviewable->role ?? null),
                 'id' => $this->reviewable_id,
                 'name' => $this->whenLoaded('reviewable', fn () => $this->getReviewableName()),
             ],
