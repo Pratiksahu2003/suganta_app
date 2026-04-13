@@ -89,7 +89,7 @@ class PublicTeacherController extends BaseApiController
      */
     public function show(int $id): JsonResponse
     {
-        $user = User::with(['profile', 'profile.teachingInfo', 'profile.socialLinks', 'portfolio'])
+        $user = User::with(['profile', 'profile.teachingInfo', 'portfolio'])
             ->where('role', 'teacher')
             ->whereNotNull('email_verified_at')
             ->where('id', '!=', self::EXCLUDED_USER_ID)
