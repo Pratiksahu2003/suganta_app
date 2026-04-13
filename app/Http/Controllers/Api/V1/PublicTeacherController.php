@@ -364,6 +364,7 @@ class PublicTeacherController extends BaseApiController
         return [
             'id' => $user->id,
             'name' => $user->name ?? $profile?->display_name ?? 'Teacher',
+            'slug' => $profile->slug,
             'bio' => Str::limit($bio, 120),
             'avatar_url' => $this->avatarUrl($profile, $user),
             'qualification' => $options['highest_qualification'],
