@@ -136,7 +136,7 @@ class NoteController extends Controller
 
         $user = Auth::user();
         $isPurchased = $note->isPurchasedBy($user->id);
-        $hasSubscriptionAccess = $this->subscriptionService->hasActiveSubscription($user, 1);
+        $hasSubscriptionAccess = $this->subscriptionService->hasActiveSubscription($user, 2);
         $canAccess = $isPurchased || $hasSubscriptionAccess || !$note->is_paid;
 
         return $this->success('Access check result.', [
@@ -208,7 +208,7 @@ class NoteController extends Controller
 
         $user = Auth::user();
         $isPurchased = $note->isPurchasedBy($user->id);
-        $hasSubscriptionAccess = $this->subscriptionService->hasActiveSubscription($user, 1);
+        $hasSubscriptionAccess = $this->subscriptionService->hasActiveSubscription($user, 2);
         $canAccess = $isPurchased || $hasSubscriptionAccess || !$note->is_paid;
 
         if (!$canAccess) {
