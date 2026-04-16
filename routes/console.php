@@ -19,3 +19,9 @@ Schedule::command('subscription:check-expiry')
     ->withoutOverlapping()
     ->onOneServer()
     ->name('subscription-expiry-check');
+
+Schedule::command('registration:check-pending-payments')
+    ->dailyAt('01:00')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->name('registration-payment-reminder-check');
