@@ -29,8 +29,14 @@ class PublicTeacherController extends BaseApiController
     public function options(): JsonResponse
     {
         $optionKeys = [
-            'gender', 'teaching_mode', 'availability_status', 'hourly_rate_range',
-            'monthly_rate_range', 'teaching_experience_years', 'travel_radius_km', 'highest_qualification',
+            'gender',
+            'teaching_mode',
+            'availability_status',
+            'hourly_rate_range',
+            'monthly_rate_range',
+            'teaching_experience_years',
+            'travel_radius_km',
+            'highest_qualification',
         ];
         $data = [
             'options' => FilterOptionsHelper::buildFromConfig($optionKeys),
@@ -66,7 +72,7 @@ class PublicTeacherController extends BaseApiController
             $usedFallback = true;
         }
 
-        $items = $teachers->map(fn (User $user) => $this->formatListItem($user));
+        $items = $teachers->map(fn(User $user) => $this->formatListItem($user));
 
         $pagination = $usedFallback
             ? FilterOptionsHelper::fallbackPaginationMeta($request, $perPage, $teachers->count())
@@ -83,7 +89,7 @@ class PublicTeacherController extends BaseApiController
      */
     public function show(int $id): JsonResponse
     {
-        $user = User::with(['profile', 'profile.teachingInfo', 'profile.socialLinks', 'portfolio'])
+        $user = User::with(['profile', 'profile.teachingInfo', 'portfolio'])
             ->where('role', 'teacher')
             ->whereNotNull('email_verified_at')
             ->where('id', '!=', self::EXCLUDED_USER_ID)
@@ -105,7 +111,7 @@ class PublicTeacherController extends BaseApiController
         $relatedTeachers = Cache::remember(
             "teacher_show_related:v{$version}:{$id}",
             self::RELATED_TEACHERS_CACHE_TTL,
-            fn () => $this->getRelatedTeachers($profile)->map(fn (User $u) => $this->formatListItem($u))->all()
+            fn() => $this->getRelatedTeachers($profile)->map(fn(User $u) => $this->formatListItem($u))->all()
         );
 
         return $this->success('Teacher profile retrieved successfully.', [
@@ -137,17 +143,17 @@ class PublicTeacherController extends BaseApiController
 
         if ($request->filled('city') && !$request->filled('location')) {
             $city = $request->get('city');
-            $query->whereHas('profile', fn ($q) => $q->where('city', 'like', '%' . $city . '%'));
+            $query->whereHas('profile', fn($q) => $q->where('city', 'like', '%' . $city . '%'));
         }
 
         if ($request->filled('area') && !$request->filled('location')) {
             $area = $request->get('area');
-            $query->whereHas('profile', fn ($q) => $q->where('area', 'like', '%' . $area . '%'));
+            $query->whereHas('profile', fn($q) => $q->where('area', 'like', '%' . $area . '%'));
         }
 
         if ($request->filled('pincode')) {
             $pincode = $request->get('pincode');
-            $query->whereHas('profile', fn ($q) => $q->where('pincode', $pincode));
+            $query->whereHas('profile', fn($q) => $q->where('pincode', $pincode));
         }
 
         $subjectId = $request->get('subject_id') ?? $request->get('subject');
@@ -161,12 +167,12 @@ class PublicTeacherController extends BaseApiController
 
         if ($request->filled('hourly_rate_range')) {
             $rateRange = $request->get('hourly_rate_range');
-            $query->whereHas('profile.teachingInfo', fn ($q) => $q->where('hourly_rate_id', $rateRange));
+            $query->whereHas('profile.teachingInfo', fn($q) => $q->where('hourly_rate_id', $rateRange));
         }
 
         if ($request->filled('monthly_rate_range')) {
             $rateRange = $request->get('monthly_rate_range');
-            $query->whereHas('profile.teachingInfo', fn ($q) => $q->where('monthly_rate_id', $rateRange));
+            $query->whereHas('profile.teachingInfo', fn($q) => $q->where('monthly_rate_id', $rateRange));
         }
 
         if ($request->filled('experience')) {
@@ -198,20 +204,20 @@ class PublicTeacherController extends BaseApiController
                 : ProfileOptionsHelper::getValue('availability_status', ucfirst($availability));
 
             if ($availabilityId !== null) {
-                $query->whereHas('profile.teachingInfo', fn ($q) => $q->where('availability_status_id', $availabilityId));
+                $query->whereHas('profile.teachingInfo', fn($q) => $q->where('availability_status_id', $availabilityId));
             }
         }
 
         if ($request->filled('verified')) {
             $verified = $request->get('verified') === 'true' || $request->boolean('verified');
-            $query->whereHas('profile.teachingInfo', fn ($q) => $q->where('verified', $verified));
+            $query->whereHas('profile.teachingInfo', fn($q) => $q->where('verified', $verified));
         }
 
         if ($request->filled('search')) {
             $search = trim((string) $request->get('search'));
             $query->where(function ($q) use ($search) {
                 $q->where('users.name', 'like', '%' . $search . '%')
-                    ->orWhereHas('profile', fn ($pq) => $pq->where('display_name', 'like', '%' . $search . '%'));
+                    ->orWhereHas('profile', fn($pq) => $pq->where('display_name', 'like', '%' . $search . '%'));
             });
         }
     }
@@ -284,20 +290,20 @@ class PublicTeacherController extends BaseApiController
             ->where('users.id', '!=', $profile->user_id)
             ->whereIn('registration_fee_status', ['paid', 'not_required'])
             ->where(function ($q) use ($subjectIds, $city) {
-            if (!empty($subjectIds)) {
-                $q->whereHas('profile.teachingInfo', function ($tq) use ($subjectIds) {
-                    $tq->where(function ($sub) use ($subjectIds) {
-                        foreach ((array) $subjectIds as $sid) {
-                            $sub->orWhereJsonContains('subjects_taught', (string) $sid);
-                        }
+                if (!empty($subjectIds)) {
+                    $q->whereHas('profile.teachingInfo', function ($tq) use ($subjectIds) {
+                        $tq->where(function ($sub) use ($subjectIds) {
+                            foreach ((array) $subjectIds as $sid) {
+                                $sub->orWhereJsonContains('subjects_taught', (string) $sid);
+                            }
+                        });
                     });
-                });
-            }
-            if ($city) {
-                $q->when(!empty($subjectIds), fn ($q) => $q->orWhereHas('profile', fn ($pq) => $pq->where('city', 'like', '%' . $city . '%')))
-                    ->when(empty($subjectIds), fn ($q) => $q->whereHas('profile', fn ($pq) => $pq->where('city', 'like', '%' . $city . '%')));
-            }
-        });
+                }
+                if ($city) {
+                    $q->when(!empty($subjectIds), fn($q) => $q->orWhereHas('profile', fn($pq) => $pq->where('city', 'like', '%' . $city . '%')))
+                        ->when(empty($subjectIds), fn($q) => $q->whereHas('profile', fn($pq) => $pq->where('city', 'like', '%' . $city . '%')));
+                }
+            });
 
         return $query->limit($limit)->get();
     }
@@ -317,7 +323,7 @@ class PublicTeacherController extends BaseApiController
                 ->orderByDesc('count')
                 ->limit($limit)
                 ->get()
-                ->map(fn ($r) => ['value' => $r->value, 'count' => (int) $r->count])
+                ->map(fn($r) => ['value' => $r->value, 'count' => (int) $r->count])
                 ->all();
         });
     }
@@ -340,7 +346,7 @@ class PublicTeacherController extends BaseApiController
 
         return Cache::remember($cacheKey, self::SUBJECTS_BY_IDS_CACHE_TTL, function () use ($ids) {
             return Subject::whereIn('id', $ids)->get(['id', 'name', 'slug', 'category'])
-                ->map(fn ($s) => ['id' => $s->id, 'name' => $s->name, 'slug' => $s->slug, 'category' => $s->category])
+                ->map(fn($s) => ['id' => $s->id, 'name' => $s->name, 'slug' => $s->slug, 'category' => $s->category])
                 ->all();
         });
     }
@@ -364,13 +370,17 @@ class PublicTeacherController extends BaseApiController
         return [
             'id' => $user->id,
             'name' => $user->name ?? $profile?->display_name ?? 'Teacher',
+            'slug' => $profile->slug ?? null,
             'bio' => Str::limit($bio, 120),
             'avatar_url' => $this->avatarUrl($profile, $user),
             'qualification' => $options['highest_qualification'],
             'experience_years' => $options['experience_years'],
             'rating' => (float) ($teachingInfo?->rating ?? 0),
             'total_reviews' => (int) ($teachingInfo?->total_reviews ?? 0),
-            'hourly_rate' => $hourlyRate ? (float) $hourlyRate : null,
+            'hourly_rate' => $teachingInfo?->hourly_rate ? (float) $teachingInfo->hourly_rate : null,
+            'hourly_rate_range' => $options['hourly_rate_range'],
+            'monthly_rate' => $teachingInfo?->monthly_rate ? (float) $teachingInfo->monthly_rate : null,
+            'monthly_rate_range' => $options['monthly_rate_range'],
             'city' => $city,
             'state' => $state,
             'location' => $this->formatLocation($profile),
@@ -395,14 +405,13 @@ class PublicTeacherController extends BaseApiController
             ? $teachingInfo->reviews()->where('status', 'published')->latest()->limit(5)->get()
             : collect();
 
-        $reviewsFormatted = $reviews->map(fn ($r) => [
+        $reviewsFormatted = $reviews->map(fn($r) => [
             'id' => $r->id,
             'rating' => $r->rating,
             'comment' => $r->comment,
             'created_at' => $r->created_at?->toIso8601String(),
         ])->all();
 
-        // Full profile structure per ProfileApi.md (Get Profile, Update Basic, Location, Social, Teaching)
         $profileData = [
             'id' => $profile->id,
             'user_id' => $profile->user_id,
@@ -413,12 +422,17 @@ class PublicTeacherController extends BaseApiController
             'date_of_birth' => $profile->date_of_birth?->format('Y-m-d'),
             'gender' => $options['gender'],
             'nationality' => $profile->nationality,
-            'phone_primary' => $profile->phone_primary,
-            'phone_secondary' => $profile->phone_secondary,
-            'whatsapp' => $profile->whatsapp,
+
+            // ✅ Masked fields
+            'phone_primary' => $this->maskPhone($profile->phone_primary),
+            'phone_secondary' => $this->maskPhone($profile->phone_secondary),
+            'whatsapp' => $this->maskPhone($profile->whatsapp),
+            'email' => $this->maskEmail($user->email ?? null),
+
             'website' => $profile->website,
             'emergency_contact_name' => $profile->emergency_contact_name,
-            'emergency_contact_phone' => $profile->emergency_contact_phone,
+            'emergency_contact_phone' => $this->maskPhone($profile->emergency_contact_phone),
+
             'highest_qualification' => $options['highest_qualification'],
             'profile_image_url' => $this->avatarUrl($profile, $user),
             'profile_completion_percentage' => $profile->profile_completion_percentage,
@@ -511,7 +525,7 @@ class PublicTeacherController extends BaseApiController
 
     private function formatPortfolioImages(array $images): array
     {
-        return array_map(fn (string $path) => [
+        return array_map(fn(string $path) => [
             'path' => $path,
             'url' => storage_file_url($path),
         ], $images);
@@ -519,7 +533,7 @@ class PublicTeacherController extends BaseApiController
 
     private function formatPortfolioFiles(array $files): array
     {
-        return array_map(fn (string $path) => [
+        return array_map(fn(string $path) => [
             'path' => $path,
             'url' => storage_file_url($path),
             'name' => basename($path),
@@ -566,5 +580,24 @@ class PublicTeacherController extends BaseApiController
     {
         $path = $profile?->profile_image ?? $user?->profile_image ?? null;
         return $path ? storage_file_url((string) $path) : null;
+    }
+
+    private function maskPhone($phone)
+    {
+        if (!$phone)
+            return null;
+        return substr($phone, 0, 2) . str_repeat('*', strlen($phone) - 4) . substr($phone, -2);
+    }
+
+    private function maskEmail($email)
+    {
+        if (!$email)
+            return null;
+
+        $parts = explode('@', $email);
+        $name = $parts[0];
+        $domain = $parts[1];
+
+        return substr($name, 0, 2) . str_repeat('*', strlen($name) - 2) . '@' . $domain;
     }
 }

@@ -21,7 +21,6 @@ class PublicInstituteService
     private const SHOW_RELATIONS = [
         'profile',
         'profile.instituteInfo',
-        'profile.socialLinks',
         'portfolio'
     ];
 

@@ -40,3 +40,5 @@ Route::prefix('v2')->middleware('auth:sanctum')->group(function (): void {
     });
 });
 
+Route::get('v2/reviews/stats', [ReviewController::class, 'stats']);
+Route::get('v2/reviews/list', [ReviewController::class, 'index']);

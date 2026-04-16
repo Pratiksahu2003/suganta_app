@@ -31,14 +31,14 @@ class AiAdviserController extends Controller
     protected function getUserTokenLimit($user): int
     {
         $freeLimit = (int) config('gemini.free_token_limit', 100000);
-        $sType = (int) config('gemini.subscription_type', 2);
+        $sType = (int) config('gemini.subscription_type', 3);
 
         $activeSubscription = $user->activeSubscriptionForType($sType)->with('plan')->first();
-
+      
         if ($activeSubscription && $activeSubscription->plan) {
-            $features = $activeSubscription->plan->features ?? [];
-            if (is_array($features) && isset($features['ai_tokens'])) {
-                return (int) $features['ai_tokens'];
+            $tokenLimit = $activeSubscription->plan->ai_tokens ?? null;
+            if ( isset($tokenLimit)) {
+                return (int) $tokenLimit;
             }
         }
 
