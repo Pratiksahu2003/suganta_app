@@ -264,6 +264,52 @@
             word-break: break-word;
         }
 
+        /* ---- Media preview (images & files) ---- */
+        .media-preview {
+            display: block;
+            margin-top: 6px;
+        }
+        .media-preview img {
+            display: block;
+            max-width: 100%;
+            max-height: 180px;
+            width: auto;
+            height: auto;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 0, 0, 0.05);
+            background: #ffffff;
+            object-fit: contain;
+        }
+        .media-preview .file-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            color: #2d3748;
+            text-decoration: none;
+            font-family: 'Segoe UI', sans-serif;
+            font-size: 13px;
+            font-weight: 500;
+            word-break: break-all;
+            margin-top: 4px;
+        }
+        .media-preview .file-chip .file-icon {
+            display: inline-block;
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+        .media-preview .file-path {
+            display: block;
+            margin-top: 4px;
+            font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+            font-size: 11px;
+            color: #718096;
+            word-break: break-all;
+        }
+
         .info-box {
             background: linear-gradient(135deg, #fff5f5 0%, #fed7d7 100%);
             border-left: 4px solid #fc8181;
@@ -345,6 +391,60 @@
         // e.g. "ProfileStudentInfo" -> "Profile Student Info".
         $prettyModelLabel = \Illuminate\Support\Str::headline($modelLabel);
 
+        // ------ Media / file preview helpers ------
+        $imageExts = ['png','jpg','jpeg','gif','webp','svg','bmp','avif','ico','heic','heif'];
+        $fileExts  = ['pdf','doc','docx','xls','xlsx','csv','ppt','pptx','txt','zip','rar','7z','mp3','mp4','mov','avi','wav','apk'];
+
+        // Strip surrounding whitespace/quotes and pick the trailing URL/path
+        // token if the value has multiple space-separated parts.
+        $extractPath = static function (?string $raw): ?string {
+            if ($raw === null) return null;
+            $raw = trim($raw, " \t\n\r\0\x0B\"'");
+            if ($raw === '' || $raw === '—' || $raw === '(empty)') return null;
+            return $raw;
+        };
+
+        // Detect file extension (lowercased, no dot) from a path/URL.
+        $getExt = static function (?string $path): ?string {
+            if ($path === null) return null;
+            $clean = preg_replace('/\?.*$/', '', $path) ?? $path;
+            $ext = strtolower(pathinfo($clean, PATHINFO_EXTENSION));
+            return $ext !== '' ? $ext : null;
+        };
+
+        // Resolve a stored file path to a full URL using the project's
+        // `storage_file_url()` helper. Absolute URLs / data URIs bypass the
+        // helper so they are used as-is.
+        $resolveUrl = static function (string $path): string {
+            if (preg_match('/^https?:\/\//i', $path) || str_starts_with($path, '//') || str_starts_with($path, 'data:')) {
+                return $path;
+            }
+            try {
+                return storage_file_url($path);
+            } catch (\Throwable $e) {
+                return $path;
+            }
+        };
+
+        $basename = static function (string $path): string {
+            $clean = preg_replace('/\?.*$/', '', $path) ?? $path;
+            return basename($clean);
+        };
+
+        $fileEmoji = static function (?string $ext): string {
+            return match ($ext) {
+                'pdf' => '📄',
+                'doc', 'docx' => '📝',
+                'xls', 'xlsx', 'csv' => '📊',
+                'ppt', 'pptx' => '📽️',
+                'zip', 'rar', '7z' => '🗜️',
+                'mp3', 'wav' => '🎵',
+                'mp4', 'mov', 'avi' => '🎬',
+                'apk' => '📱',
+                default => '📎',
+            };
+        };
+
         // Normalize $changedFields.
         $normalized = [];
         if (!empty($changedFields) && is_array($changedFields)) {
@@ -409,6 +509,44 @@
                         $type = $info['type'] ?? 'string';
                         $hasOld = !empty($info['has_old']);
                         $prettyField = \Illuminate\Support\Str::of($field)->replace('_', ' ')->title();
+
+                        // Inline renderer that returns safe HTML for a single
+                        // value: image preview, file chip, or plain text.
+                        $renderValue = static function ($raw) use ($extractPath, $getExt, $resolveUrl, $basename, $fileEmoji, $imageExts, $fileExts) {
+                            if ($raw === null || $raw === '') {
+                                return '<span style="color:#a0aec0;">—</span>';
+                            }
+                            if (! is_string($raw)) {
+                                return e((string) $raw);
+                            }
+                            $path = $extractPath($raw);
+                            if ($path === null) {
+                                return e($raw);
+                            }
+                            $ext = $getExt($path);
+                            $looksLikePath = (bool) preg_match('#^(https?://|/|[\w.\-]+/)#i', $path) || $ext !== null;
+                            if ($ext && in_array($ext, $imageExts, true) && $looksLikePath) {
+                                $url = $resolveUrl($path);
+                                $name = $basename($path);
+                                return '<div class="media-preview">'
+                                    . '<a href="' . e($url) . '" target="_blank" rel="noopener">'
+                                    . '<img src="' . e($url) . '" alt="' . e($name) . '">'
+                                    . '</a>'
+                                    . '<span class="file-path">' . e($name) . '</span>'
+                                    . '</div>';
+                            }
+                            if ($ext && in_array($ext, $fileExts, true) && $looksLikePath) {
+                                $url = $resolveUrl($path);
+                                $name = $basename($path);
+                                return '<div class="media-preview">'
+                                    . '<a class="file-chip" href="' . e($url) . '" target="_blank" rel="noopener">'
+                                    . '<span class="file-icon">' . $fileEmoji($ext) . '</span>'
+                                    . '<span>' . e($name) . '</span>'
+                                    . '</a>'
+                                    . '</div>';
+                            }
+                            return e($raw);
+                        };
                     @endphp
                     <div class="change-item">
                         <div class="field-label">
@@ -417,17 +555,17 @@
                         </div>
 
                         @if($isCreated || !$hasOld)
-                            <div class="value-single">{{ $info['new'] ?? '—' }}</div>
+                            <div class="value-single">{!! $renderValue($info['new'] ?? null) !!}</div>
                         @else
                             <div class="value-row">
                                 <div class="value-cell value-old">
                                     <span class="tag">Before</span>
-                                    {{ $info['old'] ?? '—' }}
+                                    {!! $renderValue($info['old'] ?? null) !!}
                                 </div>
                                 <div class="value-arrow">→</div>
                                 <div class="value-cell value-new">
                                     <span class="tag">After</span>
-                                    {{ $info['new'] ?? '—' }}
+                                    {!! $renderValue($info['new'] ?? null) !!}
                                 </div>
                             </div>
                         @endif
