@@ -643,7 +643,8 @@
 
             <div class="footer-links">
                 <a href="{{ config('app.url') }}" class="footer-link">Visit Website</a>
-                <a href="{{ config('app.url') }}/contact" class="footer-link">Contact Support</a>
+                <a href="{{ config('app.contact_url') }}" class="footer-link">Contact Support</a>
+                <a href="{{ config('app.help_center_url') }}" class="footer-link">Help Center</a>
                 <a href="{{ config('app.url') }}/payment/history" class="footer-link">Payment History</a>
             </div>
 

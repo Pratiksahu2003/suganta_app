@@ -68,6 +68,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Public Support URLs (used in every email footer / CTA)
+    |--------------------------------------------------------------------------
+    |
+    | These must always point to the public-facing marketing site so that
+    | customer-facing emails link to the right place regardless of the
+    | backend `APP_URL` (which may be an api.* subdomain).
+    |
+    */
+
+    'contact_url' => env('CONTACT_URL', 'https://www.suganta.com/contact'),
+    'help_center_url' => env('HELP_CENTER_URL', 'https://www.suganta.com/help-center'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Timezone
     |--------------------------------------------------------------------------
     |

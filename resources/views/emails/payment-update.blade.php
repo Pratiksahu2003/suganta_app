@@ -341,7 +341,8 @@
             <p>This is an automated email. Please do not reply to this message.</p>
             <p>
                 <a href="{{ config('app.url') }}">Visit our website</a> | 
-                <a href="{{ config('app.url') }}/contact">Contact Support</a>
+                <a href="{{ config('app.contact_url') }}">Contact Support</a>
+                <a href="{{ config('app.help_center_url') }}">Help Center</a>
             </p>
             <p style="margin-top: 20px; font-size: 12px; color: #9ca3af;">
                 © {{ date('Y') }} SuGanta. All rights reserved.

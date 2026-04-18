@@ -61,16 +61,18 @@ class ModelActivityNotificationService
         // force-listed, or when `email_on_all_creations` is on, or for any
         // important event.
         if ($this->shouldEmailOnCreation($model, $isImportantEvent)) {
-            $providedFields = array_values(array_filter(
+            $providedFieldNames = array_values(array_filter(
                 array_keys($model->getAttributes()),
                 fn (string $field): bool => ! $this->isIgnoredField($model, $field)
             ));
+
+            $createDiff = $this->buildCreateDiff($model, $providedFieldNames);
 
             $this->dispatchSecurityAlertEmail(
                 model: $model,
                 modelLabel: $modelLabel,
                 modelKey: $modelKey,
-                changedFields: $providedFields,
+                changedFields: $createDiff,
                 actor: $actor,
                 actorName: $actorName,
                 event: 'created',
@@ -94,13 +96,17 @@ class ModelActivityNotificationService
 
         // Drop token / session / password / bookkeeping fields. If nothing
         // meaningful is left, the whole update is treated as system noise.
-        $changedFields = array_values(array_filter(
+        $changedFieldNames = array_values(array_filter(
             array_keys($changed),
             fn (string $field): bool => ! $this->isIgnoredField($model, $field)
         ));
-        if ($changedFields === []) {
+        if ($changedFieldNames === []) {
             return;
         }
+
+        // Build an old -> new diff for each meaningful changed field so the
+        // email can show exactly what was modified.
+        $changeDiff = $this->buildChangeDiff($model, $changedFieldNames);
 
         $actor = Auth::user();
         $actorName = $actor?->name ?? 'System';
@@ -116,7 +122,7 @@ class ModelActivityNotificationService
         // In-app / push notification: keep stricter gating so only important
         // models + important field changes reach the notification feed.
         $isImportantEvent = $this->isImportantModelForEvent($model, 'updated')
-            && $this->hasImportantUpdateFieldChange($model, $changedFields);
+            && $this->hasImportantUpdateFieldChange($model, $changedFieldNames);
 
         if ($isImportantEvent) {
             $this->notifyUsersBasedOnMode(
@@ -128,7 +134,7 @@ class ModelActivityNotificationService
                     'model_label' => $modelLabel,
                     'model_id' => $modelKey,
                     'actor_user_id' => $actor?->id,
-                    'changed_fields' => $changedFields,
+                    'changed_fields' => $changedFieldNames,
                 ]
             );
         }
@@ -143,7 +149,7 @@ class ModelActivityNotificationService
                 model: $model,
                 modelLabel: $modelLabel,
                 modelKey: $modelKey,
-                changedFields: $changedFields,
+                changedFields: $changeDiff,
                 actor: $actor,
                 actorName: $actorName,
                 event: 'updated',
@@ -261,6 +267,169 @@ class ModelActivityNotificationService
         } catch (Throwable) {
             // Intentionally swallow to avoid breaking model writes.
         }
+    }
+
+    /**
+     * Build an old/new diff for updated fields.
+     *
+     * Return shape:
+     *   [
+     *     'status' => ['old' => 'pending', 'new' => 'approved', 'type' => 'string'],
+     *     'amount' => ['old' => 100, 'new' => 150, 'type' => 'number'],
+     *   ]
+     */
+    private function buildChangeDiff(Model $model, array $fields): array
+    {
+        $diff = [];
+        foreach ($fields as $field) {
+            $oldRaw = $model->getOriginal($field);
+            $newRaw = $model->getAttribute($field);
+
+            $diff[$field] = [
+                'old' => $this->formatValueForDisplay($oldRaw),
+                'new' => $this->formatValueForDisplay($newRaw),
+                'type' => $this->inferValueType($newRaw ?? $oldRaw),
+            ];
+        }
+
+        return $diff;
+    }
+
+    /**
+     * Build a "new only" diff for freshly created fields.
+     *
+     * Return shape:
+     *   [
+     *     'name'  => ['new' => 'John', 'type' => 'string'],
+     *     'email' => ['new' => 'j@x.io', 'type' => 'string'],
+     *   ]
+     */
+    private function buildCreateDiff(Model $model, array $fields): array
+    {
+        $diff = [];
+        foreach ($fields as $field) {
+            $value = $model->getAttribute($field);
+            $diff[$field] = [
+                'new' => $this->formatValueForDisplay($value),
+                'type' => $this->inferValueType($value),
+            ];
+        }
+
+        return $diff;
+    }
+
+    /**
+     * Convert any scalar / array / object value into a safe, human-readable
+     * string for display in the email. Never leaks raw objects or long blobs.
+     *
+     * - Strips HTML tags / comments (for rich-text fields like bio, description).
+     * - Collapses whitespace.
+     * - Truncates to the first 50 words with an ellipsis.
+     */
+    private function formatValueForDisplay(mixed $value): string
+    {
+        if ($value === null) {
+            return '—';
+        }
+
+        if (is_bool($value)) {
+            return $value ? 'true' : 'false';
+        }
+
+        if (is_int($value) || is_float($value)) {
+            return (string) $value;
+        }
+
+        if ($value instanceof \BackedEnum) {
+            return (string) $value->value;
+        }
+
+        if ($value instanceof \UnitEnum) {
+            return $value->name;
+        }
+
+        if ($value instanceof \DateTimeInterface) {
+            return $value->format('d M, Y h:i A');
+        }
+
+        if (is_array($value)) {
+            $encoded = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            return $this->sanitizeAndLimitWords($encoded ?: '[array]', 50);
+        }
+
+        if (is_object($value)) {
+            if (method_exists($value, '__toString')) {
+                return $this->sanitizeAndLimitWords((string) $value, 50);
+            }
+            return '[' . class_basename($value) . ']';
+        }
+
+        $string = (string) $value;
+        if ($string === '') {
+            return '(empty)';
+        }
+
+        return $this->sanitizeAndLimitWords($string, 50);
+    }
+
+    /**
+     * Strip any HTML tags / comments / script-style blocks, collapse
+     * whitespace, and cap the result at the first `$maxWords` words.
+     *
+     * Safe for rich-text field values (bio, description, comment, etc.)
+     * that may contain markup injected from a WYSIWYG editor.
+     */
+    private function sanitizeAndLimitWords(string $value, int $maxWords): string
+    {
+        // Remove HTML comments, script/style blocks first (strip_tags keeps their contents).
+        $clean = preg_replace('/<!--.*?-->/s', '', $value) ?? $value;
+        $clean = preg_replace('#<(script|style)\b[^>]*>.*?</\1>#is', '', $clean) ?? $clean;
+
+        // Strip all remaining HTML tags.
+        $clean = strip_tags($clean);
+
+        // Decode HTML entities so things like &amp; / &nbsp; display naturally.
+        $clean = html_entity_decode($clean, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+        // Collapse all whitespace (tabs, newlines, multiple spaces) into single spaces.
+        $clean = preg_replace('/\s+/u', ' ', $clean) ?? $clean;
+        $clean = trim($clean);
+
+        if ($clean === '') {
+            return '(empty)';
+        }
+
+        // Word-based truncation to the first $maxWords words.
+        $words = preg_split('/\s+/u', $clean, $maxWords + 1) ?: [];
+        if (count($words) > $maxWords) {
+            $words = array_slice($words, 0, $maxWords);
+            return implode(' ', $words) . '…';
+        }
+
+        return $clean;
+    }
+
+    /**
+     * Infer a coarse value type used by the Blade to choose the right badge.
+     */
+    private function inferValueType(mixed $value): string
+    {
+        if ($value === null) {
+            return 'null';
+        }
+        if (is_bool($value)) {
+            return 'boolean';
+        }
+        if (is_int($value) || is_float($value)) {
+            return 'number';
+        }
+        if ($value instanceof \DateTimeInterface) {
+            return 'datetime';
+        }
+        if (is_array($value) || is_object($value)) {
+            return 'json';
+        }
+        return 'string';
     }
 
     /**

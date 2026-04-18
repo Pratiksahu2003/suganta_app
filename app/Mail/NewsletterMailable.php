@@ -11,7 +11,7 @@ use Illuminate\Queue\SerializesModels;
 use App\Models\BlogPost;
 use App\Models\Newsletter;
 
-class NewsletterMailable extends Mailable
+class NewsletterMailable extends Mailable implements ShouldQueue
 {
     use Queueable, SerializesModels;
 

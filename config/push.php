@@ -131,10 +131,17 @@ return [
         // Fields that are purely system / token / session / bookkeeping noise.
         // Any change to ONLY these fields will not trigger an email or notification.
         'ignored_fields' => [
-            // Timestamps & bookkeeping
+            // Framework timestamps & soft-deletes
             'updated_at',
             'created_at',
             'deleted_at',
+            // Common Laravel verification columns (explicitly excluded per product requirement)
+            'email_verified_at',
+            'phone_verified_at',
+            'mobile_verified_at',
+            'verified_at',
+            'email_verification_sent_at',
+            'phone_verification_sent_at',
             // Session / activity tracking
             'last_activity',
             'last_seen_at',
@@ -142,6 +149,10 @@ return [
             'last_logout_at',
             'login_at',
             'logout_at',
+            'last_login_ip',
+            'last_login_user_agent',
+            'failed_login_attempts',
+            'locked_at',
             'seen_at',
             'read_at',
             'is_current_session',
@@ -213,5 +224,10 @@ return [
         // When true, the queued security email fires on ANY non-ignored model creation,
         // not just "important" ones / models in `email_force_models`.
         'email_on_all_creations' => env('PUSH_MODEL_ACTIVITY_EMAIL_ON_ALL_CREATIONS', false),
+        // Queue connection for security-alert mail. MUST NOT be "sync" so that
+        // emails are only delivered by a running `php artisan queue:work`.
+        // Defaults to "database"; override to "redis" or another driver in .env.
+        'mail_queue_connection' => env('PUSH_MODEL_ACTIVITY_MAIL_CONNECTION', 'database'),
+        'mail_queue_name' => env('PUSH_MODEL_ACTIVITY_MAIL_QUEUE', 'default'),
     ],
 ];

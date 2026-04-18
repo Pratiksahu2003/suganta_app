@@ -297,7 +297,8 @@
             <div class="social-links">
                 <a href="{{ config('app.url') }}">Visit Website</a>
                 <a href="{{ config('app.url') }}/support">Support</a>
-                <a href="{{ config('app.url') }}/contact">Contact Us</a>
+                <a href="{{ config('app.contact_url') }}">Contact Us</a>
+                <a href="{{ config('app.help_center_url') }}">Help Center</a>
             </div>
             
             <p style="margin-top: 20px; font-size: 12px; color: #a0aec0;">

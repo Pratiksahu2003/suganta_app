@@ -265,7 +265,8 @@
             <div class="footer-links">
                 <a href="{{ route('home') }}">Home</a>
                 <a href="{{ route('about') }}">About Us</a>
-                <a href="{{ route('contact') }}">Contact</a>
+                <a href="{{ config('app.contact_url') }}">Contact</a>
+                <a href="{{ config('app.help_center_url') }}">Help Center</a>
                 <a href="{{ route('blog.index') }}">Blog</a>
             </div>
             

@@ -32,7 +32,17 @@ class ModelUpdateSecurityAlert extends Mailable implements ShouldQueue
     public int $tries = 3;
 
     /**
+     * Wait 30s before retrying a failed delivery.
+     */
+    public int $backoff = 30;
+
+    /**
      * Dedicated queue so bulk activity alerts don't clog critical queues.
+     *
+     * IMPORTANT: The connection is forced to a non-sync driver (default
+     * "database") so these emails only go out when a worker picks them up
+     * via `php artisan queue:work`. Even if QUEUE_CONNECTION=sync globally,
+     * these security alerts stay async.
      */
     public function __construct(
         $user,
@@ -55,7 +65,13 @@ class ModelUpdateSecurityAlert extends Mailable implements ShouldQueue
         $this->eventTime = $eventTime ?? now()->format('d M, Y h:i A');
         $this->event = in_array($event, ['created', 'updated'], true) ? $event : 'updated';
 
-        $this->onQueue('emails');
+        $connection = config('push.model_activity.mail_queue_connection') ?: 'database';
+        if ($connection === 'sync') {
+            $connection = 'database';
+        }
+
+        $this->onConnection($connection);
+        $this->onQueue(config('push.model_activity.mail_queue_name', 'default'));
     }
 
     public function envelope(): Envelope

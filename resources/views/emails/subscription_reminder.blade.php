@@ -237,8 +237,9 @@
             <p><strong>{{ config('app.name') }} Billing Team</strong></p>
 
             <div class="social-links">
-                <a href="{{ config('app.url') }}">Visit Website</a>
-                <a href="{{ config('app.url') }}/contact">Contact Support</a>
+                <a href="{{ config('app.frontend_url') }}">Visit Website</a>
+                <a href="{{ config('app.contact_url') }}">Contact Support</a>
+                <a href="{{ config('app.help_center_url') }}">Help Center</a>
             </div>
 
             <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e2e8f0;">

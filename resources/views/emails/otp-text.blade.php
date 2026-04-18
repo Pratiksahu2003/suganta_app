@@ -56,8 +56,8 @@ Best regards,
 {{ config('app.name') }} Security Team
 
 Visit our website: {{ config('app.url') }}
-Contact Support: {{ config('app.url') }}/contact
-Help Center: {{ config('app.url') }}/help
+Contact Support: {{ config('app.contact_url') }}
+Help Center: {{ config('app.help_center_url') }}
 
 This email was sent to {{ $notifiable->email }}. If you have any questions or concerns about your account security, please contact our support team.
 

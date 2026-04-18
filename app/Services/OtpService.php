@@ -157,14 +157,13 @@ class OtpService
     protected function sendEmailOtp(User $user, string $otp): void
     {
         try {
-            Mail::send('emails.otp', [
-                'otp' => $otp,
-                'type' => 'email_verification',
-                'notifiable' => $user
-            ], function ($message) use ($user) {
-                $message->to($user->email)
-                    ->subject('Your Verification Code');
-            });
+            // Routed through the queue so it only ships when
+            // `php artisan queue:work` is running - never synchronously.
+            Mail::to($user->email)->queue(new \App\Mail\UserOtpMail(
+                user: $user,
+                otp: $otp,
+                type: 'email_verification'
+            ));
         } catch (\Exception $e) {
             Log::error("Failed to send Email OTP: " . $e->getMessage());
         }
