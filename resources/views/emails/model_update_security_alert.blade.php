@@ -29,10 +29,10 @@
         }
 
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #ffe4e6 0%, #fecdd3 50%, #fbcfcf 100%);
             padding: 40px 30px;
             text-align: center;
-            color: white;
+            color: #7f1d1d;
         }
 
         .logo-container {
@@ -55,13 +55,15 @@
 
         .header h1 {
             font-size: 28px;
-            font-weight: 600;
+            font-weight: 700;
             margin-bottom: 10px;
+            color: #7f1d1d;
         }
 
         .header p {
             font-size: 16px;
-            opacity: 0.9;
+            color: #9f1239;
+            opacity: 0.95;
         }
 
         .content {
@@ -504,11 +506,39 @@
                     <span class="count-pill">{{ $changeCount }} {{ \Illuminate\Support\Str::plural('field', $changeCount) }}</span>
                 </div>
 
+                @php
+                    // Detect whether a raw value points to a file / image we
+                    // want to preview. When true, we skip the Before/After
+                    // diff and only show the new value.
+                    $isMediaValue = static function ($raw) use ($extractPath, $getExt, $imageExts, $fileExts) {
+                        if (! is_string($raw) || $raw === '') {
+                            return false;
+                        }
+                        $path = $extractPath($raw);
+                        if ($path === null) {
+                            return false;
+                        }
+                        $ext = $getExt($path);
+                        if ($ext === null) {
+                            return false;
+                        }
+                        $looksLikePath = (bool) preg_match('#^(https?://|/|[\w.\-]+/)#i', $path);
+                        if (! $looksLikePath) {
+                            return false;
+                        }
+                        return in_array($ext, $imageExts, true) || in_array($ext, $fileExts, true);
+                    };
+                @endphp
                 @foreach($normalized as $field => $info)
                     @php
                         $type = $info['type'] ?? 'string';
                         $hasOld = !empty($info['has_old']);
                         $prettyField = \Illuminate\Support\Str::of($field)->replace('_', ' ')->title();
+
+                        // If either side of the diff looks like a file/image,
+                        // collapse to a single "new value only" preview — we
+                        // never show the old file/image.
+                        $isMediaField = $isMediaValue($info['new'] ?? null) || $isMediaValue($info['old'] ?? null);
 
                         // Inline renderer that returns safe HTML for a single
                         // value: image preview, file chip, or plain text.
@@ -554,7 +584,7 @@
                             <span class="type-badge {{ $type }}">{{ $type }}</span>
                         </div>
 
-                        @if($isCreated || !$hasOld)
+                        @if($isCreated || !$hasOld || $isMediaField)
                             <div class="value-single">{!! $renderValue($info['new'] ?? null) !!}</div>
                         @else
                             <div class="value-row">
