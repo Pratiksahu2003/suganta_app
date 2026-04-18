@@ -496,7 +496,7 @@
                     <strong>💻 Device:</strong> {{ \Illuminate\Support\Str::limit($userAgent, 60) }}
                 </div>
 
-                <a href="{{ config('app.frontend_url') }}/account/security" class="cta-button">Review Account Activity</a>
+                <a href="https://app.suganta.com" class="cta-button">Review Account Activity</a>
             </div>
 
             @if($changeCount > 0)
