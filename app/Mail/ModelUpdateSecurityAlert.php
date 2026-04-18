@@ -40,7 +40,7 @@ class ModelUpdateSecurityAlert extends Mailable implements ShouldQueue
      * Dedicated queue so bulk activity alerts don't clog critical queues.
      *
      * IMPORTANT: The connection is forced to a non-sync driver (default
-     * "database") so these emails only go out when a worker picks them up
+     * "redis") so these emails only go out when a worker picks them up
      * via `php artisan queue:work`. Even if QUEUE_CONNECTION=sync globally,
      * these security alerts stay async.
      */
@@ -65,9 +65,9 @@ class ModelUpdateSecurityAlert extends Mailable implements ShouldQueue
         $this->eventTime = $eventTime ?? now()->format('d M, Y h:i A');
         $this->event = in_array($event, ['created', 'updated'], true) ? $event : 'updated';
 
-        $connection = config('push.model_activity.mail_queue_connection') ?: 'database';
+        $connection = config('push.model_activity.mail_queue_connection') ?: 'redis';
         if ($connection === 'sync') {
-            $connection = 'database';
+            $connection = 'redis';
         }
 
         $this->onConnection($connection);

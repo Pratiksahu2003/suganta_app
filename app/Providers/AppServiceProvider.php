@@ -80,9 +80,10 @@ class AppServiceProvider extends ServiceProvider
     {
         // If the global queue connection is "sync", rewrite it for the
         // request lifecycle so ShouldQueue mailables still go async.
+        // This project uses Redis as the primary queue driver.
         $connection = config('queue.default');
         if ($connection === 'sync') {
-            $fallback = config('queue.fallback_connection', 'database');
+            $fallback = config('queue.fallback_connection', 'redis');
             config(['queue.default' => $fallback]);
         }
 

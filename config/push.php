@@ -226,8 +226,8 @@ return [
         'email_on_all_creations' => env('PUSH_MODEL_ACTIVITY_EMAIL_ON_ALL_CREATIONS', false),
         // Queue connection for security-alert mail. MUST NOT be "sync" so that
         // emails are only delivered by a running `php artisan queue:work`.
-        // Defaults to "database"; override to "redis" or another driver in .env.
-        'mail_queue_connection' => env('PUSH_MODEL_ACTIVITY_MAIL_CONNECTION', 'database'),
+        // Defaults to "redis"; override to "database" or another driver in .env.
+        'mail_queue_connection' => env('PUSH_MODEL_ACTIVITY_MAIL_CONNECTION', 'redis'),
         'mail_queue_name' => env('PUSH_MODEL_ACTIVITY_MAIL_QUEUE', 'default'),
     ],
 ];
