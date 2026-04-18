@@ -341,6 +341,10 @@
         $eventActionText = $isCreated ? 'was just created' : 'was just updated';
         $fieldsHeadingText = $isCreated ? 'Fields' : 'Changes';
 
+        // Convert CamelCase model class basename into a human-friendly label.
+        // e.g. "ProfileStudentInfo" -> "Profile Student Info".
+        $prettyModelLabel = \Illuminate\Support\Str::headline($modelLabel);
+
         // Normalize $changedFields.
         $normalized = [];
         if (!empty($changedFields) && is_array($changedFields)) {
@@ -375,13 +379,13 @@
             <div class="greeting">Hello {{ $user->name ?? 'User' }}! 👋</div>
 
             <div class="message">
-                A <strong>{{ $modelLabel }}</strong>@if($modelId) record (#{{ $modelId }})@endif linked to your {{ config('app.name') }} account {{ $eventActionText }}.
+                A <strong>{{ $prettyModelLabel }}</strong>@if($modelId) record (#{{ $modelId }})@endif linked to your {{ config('app.name') }} account {{ $eventActionText }}.
                 If this was you, no further action is required. If not, please secure your account immediately.
             </div>
 
             <div class="activity-box">
                 <div class="event-label">Activity Detected</div>
-                <div class="event-title">{{ $eventEmoji }} {{ $modelLabel }} {{ $isCreated ? 'Created' : 'Updated' }}</div>
+                <div class="event-title">{{ $eventEmoji }} {{ $prettyModelLabel }} {{ $isCreated ? 'Created' : 'Updated' }}</div>
 
                 <div class="event-meta">
                     <strong>👤 Performed by:</strong> {{ $actorName }}<br>

@@ -77,9 +77,10 @@ class ModelUpdateSecurityAlert extends Mailable implements ShouldQueue
     public function envelope(): Envelope
     {
         $action = $this->event === 'created' ? 'was created' : 'was updated';
+        $prettyLabel = \Illuminate\Support\Str::headline($this->modelLabel);
 
         return new Envelope(
-            subject: 'Security Alert: ' . $this->modelLabel . ' ' . $action . ' - ' . config('app.name'),
+            subject: 'Security Alert: ' . $prettyLabel . ' ' . $action . ' - ' . config('app.name'),
         );
     }
 
