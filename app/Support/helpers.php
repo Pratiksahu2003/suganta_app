@@ -12,33 +12,30 @@ use Illuminate\Support\Facades\Storage;
  * @param  string|null  $disk  The storage disk (default: from config)
  * @return string The full URL
  */
+
 function storage_file_url(?string $path = null, ?string $disk = null): string
 {
-
-    if (is_null($path)) {
-        return Cache::rememberForever('placeholder_no_image', function () {
+    // 🔹 Return placeholder if path is null
+    if (empty($path)) {
+        return Cache::rememberForever('storage_placeholder_no_image', function () {
             return asset('img/no.png');
         });
     }
-    $disk = $disk ?? config('filesystems.upload_disk', 'public');
 
-    if ($disk === 'gcs') {
-        $minutes = (int) config('filesystems.gcs_signed_url_expiry_minutes', 10080);
-        $expiry = now()->addMinutes($minutes);
-        $expirySeconds = max(60, ((int) $minutes) * 60);
-        $fallbackCacheSeconds = max(60, $expirySeconds - 60);
-        $configuredCacheSeconds = (int) config('filesystems.gcs_signed_url_cache_seconds', 0);
-        $cacheSeconds = $configuredCacheSeconds > 0
-            ? min(max(60, $configuredCacheSeconds), $fallbackCacheSeconds)
-            : $fallbackCacheSeconds;
-        $cacheKey = 'storage_file_url:gcs:' . sha1($path);
-
-        return Cache::remember($cacheKey, $cacheSeconds, static function () use ($path, $expiry): string {
-            return Storage::disk('gcs')->temporaryUrl($path, $expiry);
-        });
+    // 🔹 If already full URL → return directly
+    if (filter_var($path, FILTER_VALIDATE_URL)) {
+        return $path;
     }
 
-    return Storage::disk($disk)->url($path);
+    // 🔹 Clean path (remove leading slashes)
+    $cleanPath = ltrim($path, '/');
+
+    // 🔹 Unique cache key
+    $cacheKey = 'storage_file_url_' . md5($cleanPath);
+
+    return Cache::rememberForever($cacheKey, function () use ($cleanPath) {
+        return "https://cdn.suganta.com/{$cleanPath}";
+    });
 }
 
 /**
