@@ -194,13 +194,10 @@ return [
             \App\Models\UserSession::class,
             \App\Models\Otp::class,
             \App\Models\GoogleWatchChannel::class,
-            \App\Models\Chat\ChatMessageRead::class,
-            \App\Models\Chat\ChatMessageReaction::class,
+            // Website / public chat models (they live outside App\Models\Chat
+            // so the namespace filter below doesn't cover them).
             \App\Models\WebsiteChatMessage::class,
             \App\Models\WebsiteChatSession::class,
-            \App\Models\Chatbot\ChatbotWebhookEvent::class,
-            \App\Models\Chatbot\ChatbotMessageLog::class,
-            \App\Models\Chatbot\ChatbotAnalytics::class,
             // Payment-related models - never produce pushes or security emails.
             \App\Models\Payment::class,
             \App\Models\WalletTransaction::class,
@@ -212,6 +209,14 @@ return [
             'Laravel\\Passport\\RefreshToken',
             'Laravel\\Passport\\AuthCode',
             'Laravel\\Passport\\Client',
+        ],
+        // Namespace-prefix ignore list. ANY model under these namespaces is
+        // skipped — no pushes, no security emails. Useful for large model
+        // families (Chat, Chatbot, AI) so we don't have to list every class.
+        'ignored_model_namespaces' => [
+            'App\\Models\\Chat',
+            'App\\Models\\Chatbot',
+            'App\\Models\\Ai',
         ],
         // When true, the queued security email fires on ANY non-ignored model update,
         // not just the "important" ones configured above.

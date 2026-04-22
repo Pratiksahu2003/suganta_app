@@ -177,6 +177,22 @@ class ModelActivityNotificationService
             return false;
         }
 
+        // Namespace-prefix filter — any class sitting under one of the
+        // configured namespaces is ignored. Useful for grouping large model
+        // families (Chat, Chatbot, etc.) without listing every class.
+        $ignoredNamespaces = config('push.model_activity.ignored_model_namespaces', []);
+        if (is_array($ignoredNamespaces)) {
+            foreach ($ignoredNamespaces as $prefix) {
+                if (! is_string($prefix) || $prefix === '') {
+                    continue;
+                }
+                $normalized = rtrim($prefix, '\\') . '\\';
+                if (str_starts_with($modelClass, $normalized)) {
+                    return false;
+                }
+            }
+        }
+
         return true;
     }
 
