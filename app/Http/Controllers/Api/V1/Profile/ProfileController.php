@@ -40,7 +40,7 @@ class ProfileController extends BaseApiController
                 $profile = Profile::create(['user_id' => $user->id]);
             }
 
-            $profile->load(['instituteInfo', 'studentInfo', 'teachingInfo', 'professionalInfo', 'socialLinks']);
+            $profile->load(['instituteInfo', 'studentInfo', 'teachingInfo']);
             $profile->updateCompletionPercentage();
 
             $profileData = ProfileResponseFormatter::format($profile, fn ($path) => $this->getFileUrl($path));
