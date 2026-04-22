@@ -42,10 +42,8 @@ return [
             // Model activity pushes only for these models (extra safety layer).
             'model_push_models' => [
                 \App\Models\Payment::class,
-                \App\Models\Booking::class,
                 \App\Models\SupportTicket::class,
                 \App\Models\SupportTicketReply::class,
-                \App\Models\Donation::class,
                 \App\Models\UserSubscription::class,
                 \App\Models\Lead::class,
             ],
@@ -73,14 +71,13 @@ return [
             explode(',', (string) env('PUSH_MODEL_ACTIVITY_ROLES', 'admin,super-admin'))
         ))),
         // Only these model events are considered for broadcast-worthy activity.
+        // NOTE: All payment-related models (Payment, WalletTransaction,
+        // UserSubscription, SubscriptionPlan) are ignored globally in
+        // `ignored_models` below, so they never reach these lists at runtime.
         'important_models' => [
             'created' => [
-                \App\Models\Payment::class,
-                \App\Models\Booking::class,
                 \App\Models\SupportTicket::class,
                 \App\Models\SupportTicketReply::class,
-                \App\Models\Donation::class,
-                \App\Models\UserSubscription::class,
                 // Profile / wallet / portfolio models - always notify on creation.
                 \App\Models\Profile::class,
                 \App\Models\ProfileTeachingInfo::class,
@@ -88,15 +85,10 @@ return [
                 \App\Models\ProfileInstituteInfo::class,
                 \App\Models\Portfolio::class,
                 \App\Models\Wallet::class,
-                \App\Models\WalletTransaction::class,
             ],
             'updated' => [
-                \App\Models\Payment::class,
-                \App\Models\Booking::class,
                 \App\Models\SupportTicket::class,
                 \App\Models\SupportTicketReply::class,
-                \App\Models\Donation::class,
-                \App\Models\UserSubscription::class,
                 \App\Models\Lead::class,
                 // Profile / wallet / portfolio models - always notify on update.
                 \App\Models\Profile::class,
@@ -105,11 +97,11 @@ return [
                 \App\Models\ProfileInstituteInfo::class,
                 \App\Models\Portfolio::class,
                 \App\Models\Wallet::class,
-                \App\Models\WalletTransaction::class,
             ],
         ],
         // Models that MUST receive a security email on both create & update,
         // regardless of the `email_on_all_creations` / `email_on_all_updates` flags.
+        // Payment-related models are intentionally excluded — see `ignored_models`.
         'email_force_models' => [
             \App\Models\Profile::class,
             \App\Models\ProfileTeachingInfo::class,
@@ -117,15 +109,13 @@ return [
             \App\Models\ProfileInstituteInfo::class,
             \App\Models\Portfolio::class,
             \App\Models\Wallet::class,
-            \App\Models\WalletTransaction::class,
         ],
         // For updates, at least one field in this list must change.
+        // Payment-related model entries are omitted — those models are ignored.
         'important_update_fields' => [
             '*' => ['status', 'state', 'verification_status', 'is_active', 'approved_at', 'rejected_at', 'closed_at', 'expires_at', 'amount'],
-            \App\Models\Payment::class => ['status', 'amount', 'paid_at'],
             \App\Models\Booking::class => ['status', 'scheduled_at', 'cancelled_at'],
             \App\Models\SupportTicket::class => ['status', 'priority', 'assigned_to', 'resolved_at', 'closed_at'],
-            \App\Models\UserSubscription::class => ['status', 'expires_at', 'started_at'],
             \App\Models\Lead::class => ['status', 'assigned_to', 'priority'],
         ],
         // Fields that are purely system / token / session / bookkeeping noise.
@@ -211,6 +201,11 @@ return [
             \App\Models\Chatbot\ChatbotWebhookEvent::class,
             \App\Models\Chatbot\ChatbotMessageLog::class,
             \App\Models\Chatbot\ChatbotAnalytics::class,
+            // Payment-related models - never produce pushes or security emails.
+            \App\Models\Payment::class,
+            \App\Models\WalletTransaction::class,
+            \App\Models\UserSubscription::class,
+            \App\Models\SubscriptionPlan::class,
             // Common framework/package token & session models (string-form so absence of the class is safe)
             'Laravel\\Sanctum\\PersonalAccessToken',
             'Laravel\\Passport\\Token',

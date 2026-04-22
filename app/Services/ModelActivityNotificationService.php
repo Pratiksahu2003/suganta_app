@@ -68,15 +68,19 @@ class ModelActivityNotificationService
 
             $createDiff = $this->buildCreateDiff($model, $providedFieldNames);
 
-            $this->dispatchSecurityAlertEmail(
-                model: $model,
-                modelLabel: $modelLabel,
-                modelKey: $modelKey,
-                changedFields: $createDiff,
-                actor: $actor,
-                actorName: $actorName,
-                event: 'created',
-            );
+            // Skip the email entirely when the runtime filter left us with
+            // nothing displayable (e.g. model had only id/json columns).
+            if ($createDiff !== []) {
+                $this->dispatchSecurityAlertEmail(
+                    model: $model,
+                    modelLabel: $modelLabel,
+                    modelKey: $modelKey,
+                    changedFields: $createDiff,
+                    actor: $actor,
+                    actorName: $actorName,
+                    event: 'created',
+                );
+            }
         }
     }
 
@@ -144,7 +148,7 @@ class ModelActivityNotificationService
         // `email_on_all_updates` is disabled, fall back to the stricter
         // "important event" / force-list behaviour.
         $emailOnAllUpdates = (bool) config('push.model_activity.email_on_all_updates', true);
-        if ($emailOnAllUpdates || $isImportantEvent || $this->isEmailForcedModel($model)) {
+        if (($emailOnAllUpdates || $isImportantEvent || $this->isEmailForcedModel($model)) && $changeDiff !== []) {
             $this->dispatchSecurityAlertEmail(
                 model: $model,
                 modelLabel: $modelLabel,
@@ -178,6 +182,26 @@ class ModelActivityNotificationService
 
     private function isIgnoredField(Model $model, string $field): bool
     {
+        // Always hide identifier / foreign-key columns (primary keys, `*_id`,
+        // `*_uuid`) from create/update emails — they're noisy & leak internals.
+        if ($this->isIdentifierField($field)) {
+            return true;
+        }
+
+        // Hide any column whose NAME matches sensitive-data patterns
+        // (passwords, tokens, secrets, OTPs, 2FA, card / bank / national-id,
+        // etc.). This is a hard-coded defense-in-depth layer so no amount
+        // of config drift can leak secrets into the email template.
+        if ($this->isSensitiveField($field)) {
+            return true;
+        }
+
+        // Hide any column cast as JSON / array / object / collection on the
+        // model so we never render raw JSON blobs in the email template.
+        if ($this->isJsonCastField($model, $field)) {
+            return true;
+        }
+
         $globalIgnoredFields = config('push.model_activity.ignored_fields', []);
         $modelIgnoredFieldsMap = config('push.model_activity.model_ignored_fields', []);
 
@@ -191,6 +215,116 @@ class ModelActivityNotificationService
             : [];
 
         return in_array($field, $modelIgnoredFields, true);
+    }
+
+    /**
+     * Hard-coded list of sensitive field-name patterns. A field matches if
+     * its lowercased name contains any of these tokens OR matches one of
+     * the stricter word-boundary patterns.
+     *
+     * Covers: authentication, authorization, personal identifiers, payment
+     * details, and cryptographic material. Must stay broad on purpose.
+     */
+    private function isSensitiveField(string $field): bool
+    {
+        $lower = strtolower($field);
+
+        // Simple "contains" probes — fast path for the vast majority of cases.
+        $containsPatterns = [
+            // Auth & credentials
+            'password', 'passwd', 'pwd', 'secret', 'token', 'auth', 'credential',
+            'api_key', 'apikey', 'access_key', 'accesskey', 'private_key', 'privatekey',
+            'public_key', 'publickey', 'encryption_key', 'signing_key', 'signature',
+            'salt', 'nonce', 'csrf', 'xsrf', 'cookie', 'session',
+            // MFA / OTP
+            'otp', 'mfa', '2fa', 'two_factor', 'twofactor', 'recovery_code',
+            'backup_code', 'verification_code',
+            // Hashes
+            'hash',
+            // Payment
+            'card_number', 'cardnumber', 'card_no', 'cardno', 'cvv', 'cvc', 'ccv',
+            'iban', 'swift', 'bic', 'routing', 'account_number', 'bank_account',
+            // National IDs / PII
+            'ssn', 'social_security', 'aadhaar', 'aadhar', 'pan_no', 'pan_number',
+            'passport', 'drivers_license', 'driver_license', 'license_number',
+            'tax_id', 'tin_number',
+            // Misc secrets
+            'client_secret', 'webhook_secret', 'app_secret',
+        ];
+        foreach ($containsPatterns as $needle) {
+            if (str_contains($lower, $needle)) {
+                return true;
+            }
+        }
+
+        // Word-boundary patterns for short/ambiguous tokens (`pin`, `key`,
+        // `code`) so we don't over-match common words like `zipcode`,
+        // `keyword`, `pinned`, `promo_code`, etc.
+        $strictPatterns = [
+            '/(^|_)pin($|_)/',
+            '/(^|_)key($|_)/',
+            '/(^|_)auth_code($|_)/',
+        ];
+        foreach ($strictPatterns as $pattern) {
+            if (preg_match($pattern, $lower) === 1) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Identifier / foreign-key columns we never want to leak in emails.
+     * Covers `id`, any `*_id` / `*_uuid` / `*_ulid`, plus common polymorphic
+     * id helpers (`*_type` is intentionally NOT ignored here since status-like
+     * type fields may be meaningful).
+     */
+    private function isIdentifierField(string $field): bool
+    {
+        $lower = strtolower($field);
+        if ($lower === 'id' || $lower === 'uuid' || $lower === 'ulid') {
+            return true;
+        }
+
+        return (bool) preg_match('/_(id|uuid|ulid)$/', $lower);
+    }
+
+    /**
+     * Detect whether a given model attribute is cast to a JSON / array /
+     * object / collection shape. When true we skip the field entirely so the
+     * email never contains raw JSON payloads.
+     */
+    private function isJsonCastField(Model $model, string $field): bool
+    {
+        $casts = method_exists($model, 'getCasts') ? $model->getCasts() : [];
+        $cast = $casts[$field] ?? null;
+        if (! is_string($cast) || $cast === '') {
+            return false;
+        }
+
+        // Strip optional argument segment: e.g. "encrypted:array" -> "encrypted:array".
+        $normalized = strtolower($cast);
+
+        // Built-in Laravel JSON-family casts.
+        $jsonCasts = [
+            'array', 'json', 'object', 'collection',
+            'encrypted:array', 'encrypted:json', 'encrypted:object', 'encrypted:collection',
+        ];
+        if (in_array($normalized, $jsonCasts, true)) {
+            return true;
+        }
+
+        // Custom cast classes: AsArrayObject / AsCollection / AsEnumCollection / AsEncryptedArrayObject / AsEncryptedCollection.
+        if (str_contains($normalized, 'asarrayobject')
+            || str_contains($normalized, 'ascollection')
+            || str_contains($normalized, 'asenumcollection')
+            || str_contains($normalized, 'asencryptedarrayobject')
+            || str_contains($normalized, 'asencryptedcollection')) {
+            return true;
+        }
+
+        return false;
     }
 
     private function isImportantModelForEvent(Model $model, string $event): bool
@@ -285,6 +419,20 @@ class ModelActivityNotificationService
             $oldRaw = $model->getOriginal($field);
             $newRaw = $model->getAttribute($field);
 
+            // Runtime safety net: skip any field whose value resolves to a
+            // structured payload (array / object / JSON string) — we never
+            // want to dump that into the email.
+            if ($this->looksLikeStructuredValue($oldRaw) || $this->looksLikeStructuredValue($newRaw)) {
+                continue;
+            }
+
+            // Value-content safety net: if either side smells like a secret
+            // (JWT, bearer, bcrypt, PEM key, card number, long hash, etc.)
+            // drop the whole field so nothing sensitive is rendered.
+            if ($this->looksLikeSecretValue($oldRaw) || $this->looksLikeSecretValue($newRaw)) {
+                continue;
+            }
+
             $diff[$field] = [
                 'old' => $this->formatValueForDisplay($oldRaw),
                 'new' => $this->formatValueForDisplay($newRaw),
@@ -309,6 +457,18 @@ class ModelActivityNotificationService
         $diff = [];
         foreach ($fields as $field) {
             $value = $model->getAttribute($field);
+
+            // Runtime safety net: skip structured JSON-ish values.
+            if ($this->looksLikeStructuredValue($value)) {
+                continue;
+            }
+
+            // Value-content safety net: skip anything that looks like a
+            // secret / token / card number / crypto material.
+            if ($this->looksLikeSecretValue($value)) {
+                continue;
+            }
+
             $diff[$field] = [
                 'new' => $this->formatValueForDisplay($value),
                 'type' => $this->inferValueType($value),
@@ -316,6 +476,113 @@ class ModelActivityNotificationService
         }
 
         return $diff;
+    }
+
+    /**
+     * Heuristic: does $value look like a secret / token / credential / PII
+     * we should never print in the email?
+     *
+     * Matches:
+     *   - JWTs (three base64url segments separated by `.`)
+     *   - Bearer prefixes
+     *   - Bcrypt / Argon / PHPass / crypt(3) hash prefixes (`$2y$`, `$argon2...`, `$6$` etc.)
+     *   - Long hex-only strings (>= 40 chars) — SHA-1, SHA-256, MD5 repeats
+     *   - PEM / SSH private-key blocks
+     *   - 13-19 digit card-like sequences (likely PAN numbers)
+     *   - Long opaque high-entropy base64url strings (>= 40 chars, no spaces)
+     */
+    private function looksLikeSecretValue(mixed $value): bool
+    {
+        if (! is_string($value)) {
+            return false;
+        }
+        $trim = trim($value);
+        if ($trim === '') {
+            return false;
+        }
+
+        $len = strlen($trim);
+
+        // Short primitives are safe — skip the heavier regex work.
+        if ($len < 20) {
+            return false;
+        }
+
+        // Bearer / basic-auth prefixes.
+        if (preg_match('/^(Bearer|Basic)\s+\S+/i', $trim)) {
+            return true;
+        }
+
+        // JWT: header.payload.signature — all base64url.
+        if (preg_match('/^eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+$/', $trim)) {
+            return true;
+        }
+
+        // PEM / OpenSSH / PGP blocks.
+        if (preg_match('/-----BEGIN [A-Z0-9 ]+-----/', $trim)) {
+            return true;
+        }
+
+        // Unix crypt / bcrypt / argon hash prefixes.
+        if (preg_match('/^\$(2[aby]?|1|5|6|argon2[id]?|P|H|apr1)\$/', $trim)) {
+            return true;
+        }
+
+        // Long hex-only digests (MD5=32, SHA1=40, SHA256=64, SHA512=128).
+        if ($len >= 32 && preg_match('/^[a-f0-9]+$/i', $trim)) {
+            return true;
+        }
+
+        // Card-like numeric strings (13-19 digits, optionally space/dash
+        // separated). This matches Visa / Mastercard / Amex / Discover / etc.
+        $digitsOnly = preg_replace('/[\s-]/', '', $trim) ?? '';
+        if (preg_match('/^\d{13,19}$/', $digitsOnly)) {
+            return true;
+        }
+
+        // Long opaque base64url / base64 blob with no whitespace —
+        // likely an API key, refresh token, signed URL secret, etc.
+        if ($len >= 40 && preg_match('/^[A-Za-z0-9_\-+\/=]+$/', $trim) && ! str_contains($trim, ' ')) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Heuristic: is $value an array / object / JSON-looking string we should
+     * never print in the email?
+     */
+    private function looksLikeStructuredValue(mixed $value): bool
+    {
+        if (is_array($value)) {
+            return true;
+        }
+
+        if (is_object($value)
+            && ! ($value instanceof \DateTimeInterface)
+            && ! ($value instanceof \BackedEnum)
+            && ! ($value instanceof \UnitEnum)
+            && ! method_exists($value, '__toString')) {
+            return true;
+        }
+
+        if (is_string($value)) {
+            $trimmed = ltrim($value);
+            if ($trimmed === '') {
+                return false;
+            }
+            // Quick prefix check — only then pay the json_decode cost.
+            $first = $trimmed[0];
+            if (($first === '{' || $first === '[') && strlen($trimmed) <= 65535) {
+                $decoded = json_decode($trimmed, true);
+                if ((is_array($decoded)) && json_last_error() === JSON_ERROR_NONE) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
