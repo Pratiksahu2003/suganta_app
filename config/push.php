@@ -203,6 +203,11 @@ return [
             \App\Models\WalletTransaction::class,
             \App\Models\UserSubscription::class,
             \App\Models\SubscriptionPlan::class,
+            \App\Models\Chat\ChatConversation::class,
+            \App\Models\Chat\ChatConversationParticipant::class,
+            \App\Models\Chat\ChatMessage::class,
+            \App\Models\Chat\ChatMessageReaction::class,
+            \App\Models\Chat\ChatMessageRead::class,
             // Common framework/package token & session models (string-form so absence of the class is safe)
             'Laravel\\Sanctum\\PersonalAccessToken',
             'Laravel\\Passport\\Token',
