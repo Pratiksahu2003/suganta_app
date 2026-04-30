@@ -16,7 +16,7 @@ class ProfileResponseFormatter
      */
     public static function format(Profile $profile, ?callable $getFileUrl = null): array
     {
-        $profile->load(['instituteInfo', 'studentInfo', 'teachingInfo', 'professionalInfo', 'socialLinks']);
+        $profile->load(['instituteInfo', 'studentInfo', 'teachingInfo', 'professionalInfo']);
 
         $profileArray = $profile->toArray();
 

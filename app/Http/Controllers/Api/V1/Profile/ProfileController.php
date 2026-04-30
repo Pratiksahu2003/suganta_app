@@ -747,7 +747,7 @@ class ProfileController extends BaseApiController
 
             try {
                 $profile->ensureRelationshipsExist();
-                $profile->load(['instituteInfo', 'studentInfo', 'teachingInfo', 'professionalInfo', 'socialLinks']);
+                $profile->load(['instituteInfo', 'studentInfo', 'teachingInfo', 'professionalInfo']);
             } catch (\Exception $e) {
                 // Continue without relationships
             }

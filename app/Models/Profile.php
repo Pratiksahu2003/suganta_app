@@ -264,13 +264,7 @@ class Profile extends Model
         return $this->hasMany(Profile::class, 'parent_institute_id');
     }
 
-    /**
-     * Get the social media links
-     */
-    public function socialLinks()
-    {
-        return $this->hasMany(ProfileSocialLink::class);
-    }
+ 
 
     /**
      * Get subjects taught with names (for subjects_taught array)
